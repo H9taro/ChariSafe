@@ -1,10 +1,12 @@
 package jp.hisanet.charisafe.ui.main
 
 import android.Manifest
+import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,8 +23,10 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -36,7 +40,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import jp.hisanet.charisafe.domain.model.RecordingState
 import java.util.Locale
 
@@ -46,28 +54,53 @@ fun MainScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val uiState by viewModel.uiState.collectAsState()
 
-    var hasPermissions by remember { mutableStateOf(checkPermissions(context)) }
+    var hasCameraAudioPermissions by remember { mutableStateOf(checkCameraAudioPermissions(context)) }
+    var hasLocationPermission by remember { mutableStateOf(checkLocationPermission(context)) }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        hasPermissions = results.values.all { it }
+    // アプリフォアグラウンド復帰時に権限状態を自動再チェック
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasCameraAudioPermissions = checkCameraAudioPermissions(context)
+                hasLocationPermission = checkLocationPermission(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    val requestPermissions = {
+        val activity = context as? Activity
+        val permissions = mutableListOf(
+            Manifest.permission.CAMERA,
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (activity != null) {
+            ActivityCompat.requestPermissions(activity, permissions.toTypedArray(), 1001)
+        }
+    }
+
+    val openAppSettings = {
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", context.packageName, null)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        context.startActivity(intent)
     }
 
     LaunchedEffect(Unit) {
-        if (!hasPermissions) {
-            val permissions = mutableListOf(
-                Manifest.permission.CAMERA,
-                Manifest.permission.RECORD_AUDIO,
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            )
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                permissions.add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-            permissionLauncher.launch(permissions.toTypedArray())
+        if (!hasCameraAudioPermissions || !hasLocationPermission) {
+            requestPermissions()
         }
     }
 
@@ -80,7 +113,7 @@ fun MainScreen(
         verticalArrangement = Arrangement.Top
     ) {
         Text(
-            text = "ChariSafe MVP",
+            text = "ChariSafe",
             fontSize = 26.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
@@ -93,6 +126,50 @@ fun MainScreen(
         )
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        if (!hasCameraAudioPermissions) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "⚠️ カメラおよびマイクの権限が必要です",
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "録画を行うために、OS設定画面でカメラとマイクの権限を許可してください。",
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        fontSize = 12.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { requestPermissions() },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("権限要求", fontSize = 13.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = { openAppSettings() },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("設定画面を開く", fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         // Current Speed Meter Card
         Card(
@@ -144,9 +221,12 @@ fun MainScreen(
                 RowStatusItem(label = "リングバッファ時間", value = "${uiState.config.ringBufferMinutes} 分")
                 RowStatusItem(label = "GPS情報更新間隔", value = "${uiState.config.gpsIntervalSeconds} 秒")
 
-                if (uiState.status.activeGpxFile != null) {
+                if (hasLocationPermission && uiState.status.activeGpxFile != null) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(text = "GPXログ: 有効 (30秒間隔保存中)", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                } else if (!hasLocationPermission) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(text = "GPSログ: 未許可 (位置情報権限オフ)", fontSize = 12.sp, color = Color.Gray)
                 }
 
                 if (uiState.status.errorMessage != null) {
@@ -168,8 +248,14 @@ fun MainScreen(
 
             if (!isRecording && !isExporting) {
                 Button(
-                    onClick = { viewModel.startRecording() },
-                    enabled = hasPermissions,
+                    onClick = {
+                        hasCameraAudioPermissions = checkCameraAudioPermissions(context)
+                        if (hasCameraAudioPermissions) {
+                            viewModel.startRecording()
+                        } else {
+                            openAppSettings()
+                        }
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -229,10 +315,12 @@ private fun RowStatusItem(label: String, value: String, color: Color = Color.Uns
     }
 }
 
-private fun checkPermissions(context: android.content.Context): Boolean {
+private fun checkCameraAudioPermissions(context: android.content.Context): Boolean {
     val camera = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
     val audio = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-    val fineLocation = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-    val notification = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-    return camera && audio && fineLocation && notification
+    return camera && audio
+}
+
+private fun checkLocationPermission(context: android.content.Context): Boolean {
+    return ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 }

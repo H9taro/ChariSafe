@@ -73,6 +73,8 @@ class LocationTracker(private val context: Context) {
             } else {
                 Log.w(TAG, "No Location Provider is enabled")
             }
+        } catch (e: SecurityException) {
+            Log.e(TAG, "SecurityException: Location permission not granted", e)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start location tracking", e)
         }
