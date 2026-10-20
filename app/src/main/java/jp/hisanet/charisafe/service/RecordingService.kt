@@ -57,10 +57,12 @@ class RecordingService : Service(), LifecycleOwner {
 
         const val ACTION_START_RECORDING = "jp.hisanet.charisafe.action.START_RECORDING"
         const val ACTION_STOP_RECORDING = "jp.hisanet.charisafe.action.STOP_RECORDING"
+        const val EXTRA_TARGET_FPS = "jp.hisanet.charisafe.extra.TARGET_FPS"
     }
 
     data class ServiceState(
         val isRecording: Boolean = false,
+        val targetFps: Int = 15,
         val elapsedTimeSec: Long = 0,
         val recordedBytes: Long = 0,
         val currentFile: String = "",
@@ -99,9 +101,12 @@ class RecordingService : Service(), LifecycleOwner {
         createNotificationChannel()
     }
 
+    private var targetFps: Int = 15
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
-        Log.i(TAG, "onStartCommand action: $action")
+        targetFps = intent?.getIntExtra(EXTRA_TARGET_FPS, 15) ?: 15
+        Log.i(TAG, "onStartCommand action: $action, targetFps: $targetFps")
 
         when (action) {
             ACTION_START_RECORDING -> {
@@ -185,6 +190,7 @@ class RecordingService : Service(), LifecycleOwner {
             return
         }
 
+        metricsLogger = PocMetricsLogger(this, "PoC-FPS-${targetFps}fps")
         metricsLogger?.startSession()
 
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
@@ -211,14 +217,14 @@ class RecordingService : Service(), LifecycleOwner {
 
         val recorder = recorderBuilder.build()
 
-        // VideoCapture Builder with Camera2Interop for 15 FPS Target
+        // VideoCapture Builder with Camera2Interop for Target FPS
         val videoCaptureBuilder = VideoCapture.Builder(recorder)
 
-        // Camera2Interop によりフレームレートを15fpsに制限 (Target FPS Range: 15..15)
+        // Camera2Interop によりフレームレートをターゲットFPSに制限 (Target FPS Range)
         val camera2Interop = Camera2Interop.Extender(videoCaptureBuilder)
         camera2Interop.setCaptureRequestOption(
             CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
-            Range(15, 15)
+            Range(targetFps, targetFps)
         )
 
         videoCapture = videoCaptureBuilder.build()
@@ -250,12 +256,13 @@ class RecordingService : Service(), LifecycleOwner {
         if (!dir.exists()) dir.mkdirs()
 
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val videoFile = File(dir, "PoC1_${timestamp}.mp4")
+        val videoFile = File(dir, "PoC_FPS_${targetFps}fps_${timestamp}.mp4")
 
         val outputOptions = FileOutputOptions.Builder(videoFile).build()
 
         _serviceState.value = _serviceState.value.copy(
             isRecording = true,
+            targetFps = targetFps,
             currentFile = videoFile.absolutePath,
             errorMessage = null
         )

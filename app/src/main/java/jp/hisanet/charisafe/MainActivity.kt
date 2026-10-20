@@ -79,9 +79,10 @@ class MainActivity : ComponentActivity() {
                     Poc1MainScreen(
                         modifier = Modifier.padding(innerPadding),
                         getServiceState = { recordingService?.serviceState },
-                        onStartRecording = {
+                        onStartRecording = { selectedFps ->
                             val startIntent = Intent(this, RecordingService::class.java).apply {
                                 action = RecordingService.ACTION_START_RECORDING
+                                putExtra(RecordingService.EXTRA_TARGET_FPS, selectedFps)
                             }
                             startForegroundService(startIntent)
                         },
@@ -110,10 +111,11 @@ class MainActivity : ComponentActivity() {
 fun Poc1MainScreen(
     modifier: Modifier = Modifier,
     getServiceState: () -> kotlinx.coroutines.flow.StateFlow<RecordingService.ServiceState>?,
-    onStartRecording: () -> Unit,
+    onStartRecording: (Int) -> Unit,
     onStopRecording: () -> Unit
 ) {
     val context = LocalContext.current
+    var selectedFps by remember { mutableStateOf(15) }
     var hasPermissions by remember { mutableStateOf(checkPermissions(context)) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -183,7 +185,7 @@ fun Poc1MainScreen(
             Column(modifier = Modifier.padding(16.dp)) {
                 RowStatusItem(
                     label = "録画ステータス",
-                    value = if (serviceState.isRecording) "🔴 録画中 (ACTIVE)" else "⚪ 停止中 (STOPPED)",
+                    value = if (serviceState.isRecording) "🔴 録画中 (${serviceState.targetFps}fps)" else "⚪ 停止中 (STOPPED)",
                     color = if (serviceState.isRecording) Color.Red else Color.Gray
                 )
 
@@ -221,21 +223,49 @@ fun Poc1MainScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Action Buttons
+        // Action Buttons & FPS selector
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             if (!serviceState.isRecording) {
+                Text(
+                    text = "【撮影FPSモード選択】",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    listOf(15, 10, 5).forEach { fps ->
+                        val isSelected = selectedFps == fps
+                        Button(
+                            onClick = { selectedFps = fps },
+                            colors = if (isSelected) {
+                                ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            } else {
+                                ButtonDefaults.buttonColors(containerColor = Color.LightGray)
+                            }
+                        ) {
+                            Text("${fps} fps")
+                        }
+                    }
+                }
+
                 Button(
-                    onClick = onStartRecording,
+                    onClick = { onStartRecording(selectedFps) },
                     enabled = hasPermissions,
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp)
                 ) {
-                    Text("PoC-1 連続録画スタート (720p/15fps)", fontSize = 16.sp)
+                    Text("PoC-4 連続録画スタート (720p / ${selectedFps}fps)", fontSize = 16.sp)
                 }
             } else {
                 Button(
@@ -245,7 +275,7 @@ fun Poc1MainScreen(
                         .fillMaxWidth()
                         .height(56.dp)
                 ) {
-                    Text("録画ストップ & ログ出力", fontSize = 16.sp)
+                    Text("録画ストップ & ログ出力 (${serviceState.targetFps}fps)", fontSize = 16.sp)
                 }
             }
         }
