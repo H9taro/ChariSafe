@@ -79,7 +79,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun loadExistingEvents() {
         viewModelScope.launch {
             try {
-                val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir(getApplication())
+                val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir()
                 val files = recordingsDir.listFiles { _, name -> name.startsWith("event_") && name.endsWith(".mp4") }
                     ?.sortedByDescending { it.lastModified() }
                     ?: emptyList()
@@ -136,9 +136,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _selectedEventFile.value = null
             }
         }
-    }
-
-    fun updateConfig(newConfig: AppConfig) {
-        configRepository.updateConfig(newConfig)
     }
 }

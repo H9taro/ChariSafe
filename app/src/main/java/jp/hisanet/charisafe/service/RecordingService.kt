@@ -39,8 +39,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -82,11 +80,8 @@ class RecordingService : Service(), LifecycleOwner {
     private var metricsJob: Job? = null
 
     private val _serviceState = MutableStateFlow(ServiceState())
-    val serviceState: StateFlow<ServiceState> = _serviceState.asStateFlow()
 
-    inner class LocalBinder : Binder() {
-        fun getService(): RecordingService = this@RecordingService
-    }
+    class LocalBinder : Binder()
 
     override val lifecycle: Lifecycle
         field = LifecycleRegistry(this)

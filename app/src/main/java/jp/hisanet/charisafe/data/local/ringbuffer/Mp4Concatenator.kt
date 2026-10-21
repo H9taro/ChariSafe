@@ -69,7 +69,7 @@ object Mp4Concatenator {
 
                     val samplePts = fileExtractor.sampleTime
                     bufferInfo.presentationTimeUs = globalPtsOffsetUs + samplePts
-                    bufferInfo.flags = fileExtractor.sampleFlags
+                    fileExtractor.sampleFlags.also { bufferInfo.flags = it }
 
                     muxer.writeSampleData(muxerTrackIndex, buffer, bufferInfo)
 

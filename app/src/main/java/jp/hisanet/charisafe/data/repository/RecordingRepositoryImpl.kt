@@ -57,7 +57,7 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
     }
 
     override fun startRecording(config: AppConfig) {
-        ringBufferManager = RingBufferManager(context, config.ringBufferMinutes)
+        ringBufferManager = RingBufferManager(config.ringBufferMinutes)
 
         val startIntent = Intent(context, RecordingService::class.java).apply {
             action = RecordingService.ACTION_START_RECORDING
@@ -99,7 +99,7 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
                 return@withContext null
             }
 
-            val recordingsDir = FileUtils.getRecordingsDir(context)
+            val recordingsDir = FileUtils.getRecordingsDir()
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val eventFile = File(recordingsDir, "event_${timestamp}.mp4")
 

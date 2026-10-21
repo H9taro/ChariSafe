@@ -12,18 +12,14 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.hardware.camera2.CaptureRequest
 import android.os.Binder
-import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import android.util.Range
-import android.util.Size
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.resolutionselector.ResolutionSelector
-import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.Quality
@@ -46,8 +42,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -94,14 +88,12 @@ class RecordingService : Service(), LifecycleOwner {
     private var metricsJob: Job? = null
 
     private val _serviceState = MutableStateFlow(ServiceState())
-    val serviceState: StateFlow<ServiceState> = _serviceState.asStateFlow()
 
     inner class LocalBinder : Binder() {
         fun getService(): RecordingService = this@RecordingService
     }
 
-    override val lifecycle: Lifecycle
-        get() = lifecycleRegistry
+    override val lifecycle: Lifecycle = lifecycleRegistry
 
     override fun onCreate() {
         super.onCreate()
@@ -109,7 +101,7 @@ class RecordingService : Service(), LifecycleOwner {
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
 
-        ringBufferManager = RingBufferManager(this)
+        ringBufferManager = RingBufferManager()
         createNotificationChannel()
     }
 
@@ -141,17 +133,15 @@ class RecordingService : Service(), LifecycleOwner {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "ChariSafe Recording",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "ChariSafe Background Recording Status"
-            }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+        val channel = NotificationChannel(
+            /* id = */ CHANNEL_ID,
+            /* name = */ "ChariSafe Recording",
+            /* importance = */ NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "ChariSafe Background Recording Status"
         }
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(channel)
     }
 
     private fun startForegroundWithNotification() {
@@ -170,15 +160,11 @@ class RecordingService : Service(), LifecycleOwner {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        startForeground(
+            /* id = */ NOTIFICATION_ID,
+            /* notification = */ notification,
+            /* foregroundServiceType = */ ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        )
     }
 
     private fun acquireWakeLock() {
@@ -243,17 +229,8 @@ class RecordingService : Service(), LifecycleOwner {
 
         val recorder = recorderBuilder.build()
 
+        // 公開APIである Recorder の QualitySelector を使用して解像度を制御
         val videoCaptureBuilder = VideoCapture.Builder(recorder)
-            .setResolutionSelector(
-                ResolutionSelector.Builder()
-                    .setResolutionStrategy(
-                        ResolutionStrategy(
-                            Size(resWidth, resHeight),
-                            ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
-                        )
-                    )
-                    .build()
-            )
 
         val camera2Interop = Camera2Interop.Extender(videoCaptureBuilder)
         camera2Interop.setCaptureRequestOption(
@@ -342,7 +319,7 @@ class RecordingService : Service(), LifecycleOwner {
                 val currentState = _serviceState.value
                 val details = "Bytes:${currentState.recordedBytes}, File:${File(currentState.currentFile).name}"
                 metricsLogger?.captureMetrics(details)
-                delay(15_000L)
+                delay(timeMillis = 15_000L)
             }
         }
     }
@@ -364,12 +341,7 @@ class RecordingService : Service(), LifecycleOwner {
     }
 
     private fun stopForegroundAndSelf() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
+        stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 

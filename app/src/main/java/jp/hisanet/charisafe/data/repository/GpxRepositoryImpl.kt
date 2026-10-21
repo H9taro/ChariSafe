@@ -17,7 +17,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class GpxRepositoryImpl(private val context: Context) : GpxRepository {
+class GpxRepositoryImpl(context: Context) : GpxRepository {
 
     companion object {
         private const val TAG = "GpxRepositoryImpl"
@@ -33,7 +33,7 @@ class GpxRepositoryImpl(private val context: Context) : GpxRepository {
         get() = locationTracker.currentLocation
 
     override fun startLogging(intervalSeconds: Long) {
-        val gpxDir = FileUtils.getGpxDir(context)
+        val gpxDir = FileUtils.getGpxDir()
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val file = File(gpxDir, "ride_${timestamp}.gpx")
         activeGpxFile = file

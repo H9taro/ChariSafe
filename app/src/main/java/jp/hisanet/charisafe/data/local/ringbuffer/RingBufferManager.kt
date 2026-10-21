@@ -1,18 +1,17 @@
 package jp.hisanet.charisafe.data.local.ringbuffer
 
-import android.content.Context
 import android.util.Log
 import jp.hisanet.charisafe.util.FileUtils
 import java.io.File
 
-class RingBufferManager(private val context: Context, private val ringBufferMinutes: Int = 5) {
+class RingBufferManager(private val ringBufferMinutes: Int = 5) {
 
     companion object {
         private const val TAG = "RingBufferManager"
     }
 
     fun createNextSegmentFile(): File {
-        val dir = FileUtils.getRingBufferDir(context)
+        val dir = FileUtils.getRingBufferDir()
         val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
         val segmentFile = File(dir, "seg_${timestamp}.mp4")
 
@@ -45,7 +44,7 @@ class RingBufferManager(private val context: Context, private val ringBufferMinu
     }
 
     fun getRecentSegmentsForExport(beforeMinutes: Int): List<File> {
-        val dir = FileUtils.getRingBufferDir(context)
+        val dir = FileUtils.getRingBufferDir()
         try {
             val files = dir.listFiles { _, name -> name.startsWith("seg_") && name.endsWith(".mp4") }
                 ?.filter { it.exists() && it.length() > 0 }
@@ -65,7 +64,7 @@ class RingBufferManager(private val context: Context, private val ringBufferMinu
     }
 
     fun clearAll() {
-        val dir = FileUtils.getRingBufferDir(context)
+        val dir = FileUtils.getRingBufferDir()
         try {
             dir.listFiles { _, name -> name.startsWith("seg_") && name.endsWith(".mp4") }
                 ?.forEach { it.delete() }

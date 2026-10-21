@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class LocationTracker(private val context: Context) {
+class LocationTracker(context: Context) {
 
     companion object {
         private const val TAG = "LocationTracker"
@@ -24,7 +24,8 @@ class LocationTracker(private val context: Context) {
     private val _currentLocation = MutableStateFlow<GpxPoint?>(null)
     val currentLocation: StateFlow<GpxPoint?> = _currentLocation.asStateFlow()
 
-    private val locationListener = object : LocationListener {
+    private val locationListener by lazy {
+        object : LocationListener {
         override fun onLocationChanged(location: Location) {
             val speedKmh = if (location.hasSpeed()) location.speed * 3.6f else 0f
             val point = GpxPoint(
@@ -42,6 +43,7 @@ class LocationTracker(private val context: Context) {
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
         override fun onProviderEnabled(provider: String) {}
         override fun onProviderDisabled(provider: String) {}
+    }
     }
 
     @SuppressLint("MissingPermission")

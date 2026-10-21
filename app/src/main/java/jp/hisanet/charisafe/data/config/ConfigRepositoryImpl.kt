@@ -8,6 +8,7 @@ import jp.hisanet.charisafe.domain.repository.ConfigRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import androidx.core.content.edit
 
 class ConfigRepositoryImpl(context: Context) : ConfigRepository {
 
@@ -49,13 +50,13 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
     override fun getConfig(): AppConfig = _configState.value
 
     override fun updateConfig(config: AppConfig) {
-        prefs.edit()
-            .putInt(KEY_FPS, config.fps)
-            .putLong(KEY_GPS_INTERVAL, config.gpsIntervalSeconds)
-            .putInt(KEY_RING_BUFFER, config.ringBufferMinutes)
-            .putString(KEY_RESOLUTION, config.resolution.name)
-            .putBoolean(KEY_AUDIO_ENABLED, config.audioEnabled)
-            .apply()
+        prefs.edit {
+            putInt(KEY_FPS, config.fps)
+                .putLong(KEY_GPS_INTERVAL, config.gpsIntervalSeconds)
+                .putInt(KEY_RING_BUFFER, config.ringBufferMinutes)
+                .putString(KEY_RESOLUTION, config.resolution.name)
+                .putBoolean(KEY_AUDIO_ENABLED, config.audioEnabled)
+        }
 
         _configState.value = config
     }
