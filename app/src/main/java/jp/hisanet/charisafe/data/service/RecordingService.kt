@@ -1,11 +1,14 @@
 package jp.hisanet.charisafe.data.service
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.hardware.camera2.CaptureRequest
 import android.os.Binder
@@ -37,12 +40,15 @@ import androidx.lifecycle.LifecycleRegistry
 import jp.hisanet.charisafe.MainActivity
 import jp.hisanet.charisafe.R
 import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
+import jp.hisanet.charisafe.poc.PocMetricsLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.io.File
 
 class RecordingService : Service(), LifecycleOwner {
@@ -57,6 +63,7 @@ class RecordingService : Service(), LifecycleOwner {
         const val EXTRA_TARGET_FPS = "jp.hisanet.charisafe.extra.TARGET_FPS"
         const val EXTRA_RESOLUTION_WIDTH = "jp.hisanet.charisafe.extra.RESOLUTION_WIDTH"
         const val EXTRA_RESOLUTION_HEIGHT = "jp.hisanet.charisafe.extra.RESOLUTION_HEIGHT"
+        const val EXTRA_AUDIO_ENABLED = "jp.hisanet.charisafe.extra.AUDIO_ENABLED"
     }
 
     data class ServiceState(
@@ -70,6 +77,7 @@ class RecordingService : Service(), LifecycleOwner {
 
     private val binder = LocalBinder()
     private val lifecycleRegistry = LifecycleRegistry(this)
+    private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var cameraProvider: ProcessCameraProvider? = null
@@ -80,6 +88,10 @@ class RecordingService : Service(), LifecycleOwner {
     private var targetFps: Int = 10
     private var resWidth: Int = 1280
     private var resHeight: Int = 720
+    private var audioEnabled: Boolean = false
+
+    private var metricsLogger: PocMetricsLogger? = null
+    private var metricsJob: Job? = null
 
     private val _serviceState = MutableStateFlow(ServiceState())
     val serviceState: StateFlow<ServiceState> = _serviceState.asStateFlow()
@@ -106,8 +118,9 @@ class RecordingService : Service(), LifecycleOwner {
         targetFps = intent?.getIntExtra(EXTRA_TARGET_FPS, 10) ?: 10
         resWidth = intent?.getIntExtra(EXTRA_RESOLUTION_WIDTH, 1280) ?: 1280
         resHeight = intent?.getIntExtra(EXTRA_RESOLUTION_HEIGHT, 720) ?: 720
+        audioEnabled = intent?.getBooleanExtra(EXTRA_AUDIO_ENABLED, false) ?: false
 
-        Log.i(TAG, "onStartCommand action: $action, targetFps: $targetFps, res: ${resWidth}x${resHeight}")
+        Log.i(TAG, "onStartCommand action: $action, targetFps: $targetFps, res: ${resWidth}x${resHeight}, audio: $audioEnabled")
 
         when (action) {
             ACTION_START_RECORDING -> {
@@ -197,6 +210,10 @@ class RecordingService : Service(), LifecycleOwner {
             return
         }
 
+        // バッテリー・温度などの省電力モニタリング用ログを再導入
+        metricsLogger = PocMetricsLogger(this, "ChariSafe-${targetFps}fps")
+        metricsLogger?.startSession()
+
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             try {
@@ -279,11 +296,17 @@ class RecordingService : Service(), LifecycleOwner {
             errorMessage = null
         )
 
-        activeRecording = capture.output
-            .prepareRecording(this, outputOptions)
-            .start(ContextCompat.getMainExecutor(this)) { event ->
-                handleRecordEvent(event, segmentFile.absolutePath)
-            }
+        val pendingRecording = capture.output.prepareRecording(this, outputOptions)
+        if (audioEnabled && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            @SuppressLint("MissingPermission")
+            pendingRecording.withAudioEnabled()
+        }
+
+        activeRecording = pendingRecording.start(ContextCompat.getMainExecutor(this)) { event ->
+            handleRecordEvent(event, segmentFile.absolutePath)
+        }
+
+        startMetricsLoggingJob()
     }
 
     private fun handleRecordEvent(event: VideoRecordEvent, filePath: String) {
@@ -312,7 +335,22 @@ class RecordingService : Service(), LifecycleOwner {
         }
     }
 
+    private fun startMetricsLoggingJob() {
+        metricsJob?.cancel()
+        metricsJob = serviceScope.launch {
+            while (_serviceState.value.isRecording) {
+                val currentState = _serviceState.value
+                val details = "Bytes:${currentState.recordedBytes}, File:${File(currentState.currentFile).name}"
+                metricsLogger?.captureMetrics(details)
+                delay(15_000L)
+            }
+        }
+    }
+
     private fun stopRecordingPipeline() {
+        metricsJob?.cancel()
+        metricsJob = null
+
         activeRecording?.stop()
         activeRecording = null
 

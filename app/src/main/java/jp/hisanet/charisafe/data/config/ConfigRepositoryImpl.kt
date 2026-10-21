@@ -17,6 +17,7 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
         private const val KEY_GPS_INTERVAL = "key_gps_interval"
         private const val KEY_RING_BUFFER = "key_ring_buffer"
         private const val KEY_RESOLUTION = "key_resolution"
+        private const val KEY_AUDIO_ENABLED = "key_audio_enabled"
     }
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -28,6 +29,7 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
         val fps = prefs.getInt(KEY_FPS, 10)
         val gpsInterval = prefs.getLong(KEY_GPS_INTERVAL, 30L)
         val ringBuffer = prefs.getInt(KEY_RING_BUFFER, 5)
+        val audioEnabled = prefs.getBoolean(KEY_AUDIO_ENABLED, false)
         val resName = prefs.getString(KEY_RESOLUTION, VideoResolution.HD_720P.name) ?: VideoResolution.HD_720P.name
         val resolution = try {
             VideoResolution.valueOf(resName)
@@ -39,7 +41,8 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
             fps = fps,
             gpsIntervalSeconds = gpsInterval,
             ringBufferMinutes = ringBuffer,
-            resolution = resolution
+            resolution = resolution,
+            audioEnabled = audioEnabled
         )
     }
 
@@ -51,6 +54,7 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
             .putLong(KEY_GPS_INTERVAL, config.gpsIntervalSeconds)
             .putInt(KEY_RING_BUFFER, config.ringBufferMinutes)
             .putString(KEY_RESOLUTION, config.resolution.name)
+            .putBoolean(KEY_AUDIO_ENABLED, config.audioEnabled)
             .apply()
 
         _configState.value = config
