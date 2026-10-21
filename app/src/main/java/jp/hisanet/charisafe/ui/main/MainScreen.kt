@@ -8,6 +8,7 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +23,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -47,6 +50,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import jp.hisanet.charisafe.domain.model.RecordingState
+import jp.hisanet.charisafe.domain.model.VideoResolution
 import java.io.File
 import java.util.Locale
 
@@ -115,7 +119,6 @@ fun MainScreen(
         }
     }
 
-    // 新規保存時のToast通知
     var previousListSize by remember { mutableIntStateOf(uiState.savedEventFiles.size) }
     LaunchedEffect(uiState.savedEventFiles.size) {
         if (uiState.savedEventFiles.size > previousListSize) {
@@ -144,6 +147,8 @@ fun MainScreen(
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
         )
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         if (!hasCameraAudioPermissions) {
             Card(
@@ -214,7 +219,7 @@ fun MainScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // System Status Card
+        // System Status Card & Settings (プルダウン変更対応)
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
@@ -235,17 +240,48 @@ fun MainScreen(
                     },
                     color = if (isRecording) Color.Red else if (isExporting) Color(0xFFFF9800) else Color.Gray
                 )
-                if (hasLocationPermission && uiState.status.activeGpxFile != null) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = "GPXログ: 有効 (30秒間隔保存中)", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                } else if (!hasLocationPermission) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = "GPXログ: 未許可 (位置情報権限オフ)", fontSize = 12.sp, color = Color.Gray)
-                }
 
+                Spacer(modifier = Modifier.height(6.dp))
 
-                RowStatusItem(label = "リングバッファ時間", value = "${uiState.config.ringBufferMinutes} 分")
-                RowStatusItem(label = "GPS情報更新間隔", value = "${uiState.config.gpsIntervalSeconds} 秒")
+                // 1. リングバッファ時間 プルダウン
+                DropdownSettingItem(
+                    label = "リングバッファ時間",
+                    currentValue = "${uiState.config.ringBufferMinutes} 分",
+                    options = listOf(3, 5, 10),
+                    optionLabel = { "${it} 分" },
+                    enabled = !isRecording,
+                    onSelected = { viewModel.updateRingBuffer(it) }
+                )
+
+                // 2. GPS情報更新間隔 プルダウン
+                DropdownSettingItem(
+                    label = "GPS情報更新間隔",
+                    currentValue = "${uiState.config.gpsIntervalSeconds} 秒",
+                    options = listOf(1L, 5L, 10L, 30L),
+                    optionLabel = { "${it} 秒" },
+                    enabled = !isRecording,
+                    onSelected = { viewModel.updateGpsInterval(it) }
+                )
+
+                // 3. FPS プルダウン
+                DropdownSettingItem(
+                    label = "撮影 FPS",
+                    currentValue = "${uiState.config.fps} fps",
+                    options = listOf(5, 10, 15),
+                    optionLabel = { "${it} fps" },
+                    enabled = !isRecording,
+                    onSelected = { viewModel.updateFps(it) }
+                )
+
+                // 4. 録画解像度 プルダウン
+                DropdownSettingItem(
+                    label = "録画解像度",
+                    currentValue = uiState.config.resolution.label,
+                    options = VideoResolution.entries,
+                    optionLabel = { it.label },
+                    enabled = !isRecording,
+                    onSelected = { viewModel.updateResolution(it) }
+                )
 
                 if (uiState.status.errorMessage != null) {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -373,6 +409,53 @@ fun MainScreen(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun <T> DropdownSettingItem(
+    label: String,
+    currentValue: String,
+    options: List<T>,
+    optionLabel: (T) -> String,
+    enabled: Boolean,
+    onSelected: (T) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = label, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+
+        Box {
+            OutlinedButton(
+                onClick = { if (enabled) expanded = true },
+                enabled = enabled,
+                modifier = Modifier.height(32.dp)
+            ) {
+                Text(text = currentValue, fontSize = 11.sp)
+            }
+
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                options.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(text = optionLabel(option), fontSize = 12.sp) },
+                        onClick = {
+                            onSelected(option)
+                            expanded = false
+                        }
+                    )
                 }
             }
         }

@@ -10,6 +10,7 @@ import jp.hisanet.charisafe.data.repository.RecordingRepositoryImpl
 import jp.hisanet.charisafe.domain.model.AppConfig
 import jp.hisanet.charisafe.domain.model.RecordingState
 import jp.hisanet.charisafe.domain.model.SystemStatus
+import jp.hisanet.charisafe.domain.model.VideoResolution
 import jp.hisanet.charisafe.domain.repository.ConfigRepository
 import jp.hisanet.charisafe.domain.repository.GpxRepository
 import jp.hisanet.charisafe.domain.repository.RecordingRepository
@@ -17,6 +18,7 @@ import jp.hisanet.charisafe.domain.usecase.SaveManualEventUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -113,7 +115,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     currentList.add(0, eventFile)
                     _savedEventFiles.value = currentList
                 }
-                // 自動で新しく保存されたファイルを選択状態にする
                 _selectedEventFile.value = eventFile
             } else {
                 Log.e(TAG, "Manual event export returned null file")
@@ -136,5 +137,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _selectedEventFile.value = null
             }
         }
+    }
+
+    fun updateFps(fps: Int) {
+        val current = configRepository.getConfig()
+        configRepository.updateConfig(current.copy(fps = fps))
+    }
+
+    fun updateGpsInterval(seconds: Long) {
+        val current = configRepository.getConfig()
+        configRepository.updateConfig(current.copy(gpsIntervalSeconds = seconds))
+    }
+
+    fun updateRingBuffer(minutes: Int) {
+        val current = configRepository.getConfig()
+        configRepository.updateConfig(current.copy(ringBufferMinutes = minutes))
+    }
+
+    fun updateResolution(resolution: VideoResolution) {
+        val current = configRepository.getConfig()
+        configRepository.updateConfig(current.copy(resolution = resolution))
     }
 }
