@@ -4,10 +4,6 @@ import android.content.Context
 import android.util.Log
 import jp.hisanet.charisafe.util.FileUtils
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.LinkedList
-import java.util.Locale
 
 class RingBufferManager(private val context: Context, private val ringBufferMinutes: Int = 5) {
 
@@ -15,66 +11,67 @@ class RingBufferManager(private val context: Context, private val ringBufferMinu
         private const val TAG = "RingBufferManager"
     }
 
-    private val segmentQueue = LinkedList<File>()
-    private val lockedSegments = HashSet<File>()
-
-    @Synchronized
     fun createNextSegmentFile(): File {
         val dir = FileUtils.getRingBufferDir(context)
-        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
         val segmentFile = File(dir, "seg_${timestamp}.mp4")
 
-        segmentQueue.addLast(segmentFile)
-        purgeOldSegments()
-
-        Log.d(TAG, "Created next segment file: ${segmentFile.name}, queue size: ${segmentQueue.size}")
+        purgeOldSegments(dir)
+        Log.i(TAG, "Prepared next segment file: ${segmentFile.name}")
         return segmentFile
     }
 
-    @Synchronized
-    private fun purgeOldSegments() {
-        val maxSegments = ringBufferMinutes + 1
-        while (segmentQueue.size > maxSegments) {
-            val oldest = segmentQueue.removeFirst()
-            if (!lockedSegments.contains(oldest) && oldest.exists()) {
-                val deleted = oldest.delete()
-                Log.d(TAG, "Purged old segment file: ${oldest.name}, deleted=$deleted")
+    private fun purgeOldSegments(dir: File) {
+        try {
+            val files = dir.listFiles { _, name -> name.startsWith("seg_") && name.endsWith(".mp4") }
+                ?.sortedBy { it.lastModified() }
+                ?: return
+
+            // 保持する最大セグメント数 (リングバッファ時間 + 余裕1分)
+            val maxSegments = ringBufferMinutes + 2
+            if (files.size > maxSegments) {
+                val excess = files.size - maxSegments
+                for (i in 0 until excess) {
+                    val oldFile = files[i]
+                    if (oldFile.exists()) {
+                        val deleted = oldFile.delete()
+                        Log.d(TAG, "Purged old segment file: ${oldFile.name}, deleted=$deleted")
+                    }
+                }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to purge old segments", e)
         }
     }
 
-    @Synchronized
     fun getRecentSegmentsForExport(beforeMinutes: Int): List<File> {
-        val targetCount = beforeMinutes.coerceAtMost(segmentQueue.size)
-        val result = mutableListOf<File>()
+        val dir = FileUtils.getRingBufferDir(context)
+        try {
+            val files = dir.listFiles { _, name -> name.startsWith("seg_") && name.endsWith(".mp4") }
+                ?.filter { it.exists() && it.length() > 0 }
+                ?.sortedBy { it.lastModified() }
+                ?: emptyList()
 
-        for (i in (segmentQueue.size - targetCount) until segmentQueue.size) {
-            val file = segmentQueue[i]
-            if (file.exists() && file.length() > 0) {
-                result.add(file)
-                lockedSegments.add(file)
-            }
+            // 指定された分数（または現在あるすべてのファイル）を取得
+            val targetCount = beforeMinutes.coerceAtMost(files.size).coerceAtLeast(1)
+            val result = files.takeLast(targetCount)
+
+            Log.i(TAG, "Found ${result.size} segments in disk for event export (total in dir: ${files.size})")
+            return result
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get recent segments from disk", e)
+            return emptyList()
         }
-        Log.i(TAG, "Locked ${result.size} segments for event export")
-        return result
     }
 
-    @Synchronized
-    fun unlockSegments(files: List<File>) {
-        lockedSegments.removeAll(files.toSet())
-        purgeOldSegments()
-        Log.d(TAG, "Unlocked ${files.size} segments")
-    }
-
-    @Synchronized
     fun clearAll() {
-        for (file in segmentQueue) {
-            if (!lockedSegments.contains(file) && file.exists()) {
-                file.delete()
-            }
+        val dir = FileUtils.getRingBufferDir(context)
+        try {
+            dir.listFiles { _, name -> name.startsWith("seg_") && name.endsWith(".mp4") }
+                ?.forEach { it.delete() }
+            Log.i(TAG, "Cleared all ring buffer segment files")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to clear ring buffer files", e)
         }
-        segmentQueue.clear()
-        lockedSegments.clear()
-        Log.i(TAG, "Cleared ring buffer manager queue and files")
     }
 }

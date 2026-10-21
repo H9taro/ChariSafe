@@ -1,6 +1,7 @@
 package jp.hisanet.charisafe.ui.main
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import jp.hisanet.charisafe.data.config.ConfigRepositoryImpl
@@ -13,20 +14,28 @@ import jp.hisanet.charisafe.domain.repository.ConfigRepository
 import jp.hisanet.charisafe.domain.repository.GpxRepository
 import jp.hisanet.charisafe.domain.repository.RecordingRepository
 import jp.hisanet.charisafe.domain.usecase.SaveManualEventUseCase
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
 
 data class MainUiState(
     val config: AppConfig = AppConfig(),
     val status: SystemStatus = SystemStatus(),
     val isExporting: Boolean = false,
+    val savedEventFiles: List<File> = emptyList(),
+    val selectedEventFile: File? = null,
     val userMessage: String? = null
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+
+    companion object {
+        private const val TAG = "MainViewModel"
+    }
 
     private val configRepository: ConfigRepository = ConfigRepositoryImpl(application)
     private val recordingRepository: RecordingRepository = RecordingRepositoryImpl(application)
@@ -34,26 +43,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val saveManualEventUseCase = SaveManualEventUseCase(recordingRepository, configRepository)
 
+    private val _savedEventFiles = MutableStateFlow<List<File>>(emptyList())
+    private val _selectedEventFile = MutableStateFlow<File?>(null)
+
     val uiState: StateFlow<MainUiState> = combine(
         configRepository.configState,
         recordingRepository.recordingState,
-        gpxRepository.currentGpxPoint
-    ) { config, state, gpxPoint ->
+        gpxRepository.currentGpxPoint,
+        _savedEventFiles,
+        _selectedEventFile
+    ) { config, state, gpxPoint, files, selected ->
         val status = SystemStatus(
             state = state,
             currentSpeedKmh = gpxPoint?.speedKmh ?: 0f,
-            activeGpxFile = gpxRepository.getActiveGpxFilePath()
+            activeGpxFile = gpxRepository.getActiveGpxFilePath(),
+            lastEventFile = files.firstOrNull()?.absolutePath
         )
         MainUiState(
             config = config,
             status = status,
-            isExporting = (state == RecordingState.EXPORTING)
+            isExporting = (state == RecordingState.EXPORTING),
+            savedEventFiles = files,
+            selectedEventFile = selected
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = MainUiState()
     )
+
+    init {
+        loadExistingEvents()
+    }
+
+    private fun loadExistingEvents() {
+        viewModelScope.launch {
+            try {
+                val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir(getApplication())
+                val files = recordingsDir.listFiles { _, name -> name.startsWith("event_") && name.endsWith(".mp4") }
+                    ?.sortedByDescending { it.lastModified() }
+                    ?: emptyList()
+                _savedEventFiles.value = files
+                Log.i(TAG, "Loaded ${files.size} existing event videos from storage")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load existing events", e)
+            }
+        }
+    }
 
     fun startRecording() {
         val config = configRepository.getConfig()
@@ -68,7 +104,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun triggerManualEvent() {
         viewModelScope.launch {
-            saveManualEventUseCase.execute()
+            Log.i(TAG, "Triggering manual event export...")
+            val eventFile = saveManualEventUseCase.execute()
+            if (eventFile != null) {
+                Log.i(TAG, "Manual event successfully saved to: ${eventFile.absolutePath}")
+                val currentList = _savedEventFiles.value.toMutableList()
+                if (!currentList.contains(eventFile)) {
+                    currentList.add(0, eventFile)
+                    _savedEventFiles.value = currentList
+                }
+                // 自動で新しく保存されたファイルを選択状態にする
+                _selectedEventFile.value = eventFile
+            } else {
+                Log.e(TAG, "Manual event export returned null file")
+            }
+        }
+    }
+
+    fun selectEventFile(file: File?) {
+        _selectedEventFile.value = file
+    }
+
+    fun removeEventFile(file: File) {
+        val currentList = _savedEventFiles.value.toMutableList()
+        if (currentList.remove(file)) {
+            if (file.exists()) {
+                file.delete()
+            }
+            _savedEventFiles.value = currentList
+            if (_selectedEventFile.value == file) {
+                _selectedEventFile.value = null
+            }
         }
     }
 

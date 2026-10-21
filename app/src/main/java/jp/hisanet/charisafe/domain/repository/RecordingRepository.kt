@@ -9,5 +9,5 @@ interface RecordingRepository {
     val recordingState: StateFlow<RecordingState>
     fun startRecording(config: AppConfig)
     fun stopRecording()
-    suspend fun saveManualEvent(beforeMinutes: Int, afterMinutes: Int): File?
+    suspend fun saveManualEvent(beforeMinutes: Int): File?
 }

@@ -14,7 +14,6 @@ import jp.hisanet.charisafe.domain.model.RecordingState
 import jp.hisanet.charisafe.domain.repository.RecordingRepository
 import jp.hisanet.charisafe.util.FileUtils
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -82,7 +81,7 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
         Log.i(TAG, "Stopped recording")
     }
 
-    override suspend fun saveManualEvent(beforeMinutes: Int, afterMinutes: Int): File? = withContext(Dispatchers.IO) {
+    override suspend fun saveManualEvent(beforeMinutes: Int): File? = withContext(Dispatchers.IO) {
         _recordingState.value = RecordingState.EXPORTING
         val ringManager = ringBufferManager
         if (ringManager == null) {
@@ -92,29 +91,24 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
         }
 
         try {
-            val beforeSegments = ringManager.getRecentSegmentsForExport(beforeMinutes)
-
-            val afterMs = afterMinutes * 60_000L
-            if (afterMs > 0) {
-                Log.i(TAG, "Waiting for $afterMinutes min ($afterMs ms) after-event recording...")
-                delay(afterMs)
+            // ディスクから直近のセグメントを直接取得 (起動直後でも今ある分すべてを結合対象にする)
+            val segments = ringManager.getRecentSegmentsForExport(beforeMinutes)
+            if (segments.isEmpty()) {
+                Log.w(TAG, "No ring buffer segments available for export yet")
+                _recordingState.value = RecordingState.RECORDING
+                return@withContext null
             }
-
-            val totalSegments = ringManager.getRecentSegmentsForExport(beforeMinutes + afterMinutes)
 
             val recordingsDir = FileUtils.getRecordingsDir(context)
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val eventFile = File(recordingsDir, "event_${timestamp}.mp4")
 
-            val success = Mp4Concatenator.concatenate(totalSegments, eventFile)
-
-            ringManager.unlockSegments(beforeSegments)
-            ringManager.unlockSegments(totalSegments)
+            val success = Mp4Concatenator.concatenate(segments, eventFile)
 
             _recordingState.value = RecordingState.RECORDING
 
             if (success) {
-                Log.i(TAG, "Successfully saved manual event video: ${eventFile.absolutePath}")
+                Log.i(TAG, "Successfully saved manual event video instantly: ${eventFile.absolutePath}")
                 eventFile
             } else {
                 Log.e(TAG, "Failed to save manual event video")

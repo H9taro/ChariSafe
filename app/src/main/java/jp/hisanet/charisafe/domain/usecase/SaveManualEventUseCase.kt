@@ -11,7 +11,6 @@ class SaveManualEventUseCase(
     suspend fun execute(): File? {
         val config = configRepository.getConfig()
         val beforeMinutes = config.ringBufferMinutes
-        val afterMinutes = 1
-        return recordingRepository.saveManualEvent(beforeMinutes, afterMinutes)
+        return recordingRepository.saveManualEvent(beforeMinutes)
     }
 }

@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <external-files-path name="external_files_recordings" path="recordings/" />
-    <external-files-path name="external_files_gpx" path="gpx/" />
-    <external-files-path name="external_files_logs" path="logs/" />
+    <external-files-path name="charisafe_external_files" path="." />
+    <external-path name="charisafe_external_public" path="." />
 </paths>
