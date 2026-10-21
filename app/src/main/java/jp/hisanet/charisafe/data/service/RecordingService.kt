@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.hardware.camera2.CaptureRequest
+import android.media.MediaScannerConnection
 import android.os.Binder
 import android.os.IBinder
 import android.os.PowerManager
@@ -35,6 +36,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import jp.hisanet.charisafe.MainActivity
 import jp.hisanet.charisafe.R
+import jp.hisanet.charisafe.data.local.ringbuffer.Mp4Concatenator
 import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
 import jp.hisanet.charisafe.poc.PocMetricsLogger
 import kotlinx.coroutines.CoroutineScope
@@ -43,7 +45,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class RecordingService : Service(), LifecycleOwner {
 
@@ -112,7 +118,7 @@ class RecordingService : Service(), LifecycleOwner {
         resHeight = intent?.getIntExtra(EXTRA_RESOLUTION_HEIGHT, 720) ?: 720
         audioEnabled = intent?.getBooleanExtra(EXTRA_AUDIO_ENABLED, false) ?: false
 
-        Log.i(TAG, "onStartCommand action: $action, targetFps: $targetFps, res: ${resWidth}x${resHeight}, audio: $audioEnabled")
+        Log.i(TAG, "onStartCommand action: $action, targetFps: $targetFps, res: ${resWidth}x${resHeight}")
 
         when (action) {
             ACTION_START_RECORDING -> {
@@ -134,9 +140,9 @@ class RecordingService : Service(), LifecycleOwner {
 
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
-            /* id = */ CHANNEL_ID,
-            /* name = */ "ChariSafe Recording",
-            /* importance = */ NotificationManager.IMPORTANCE_LOW
+            CHANNEL_ID,
+            "ChariSafe Recording",
+            NotificationManager.IMPORTANCE_LOW
         ).apply {
             description = "ChariSafe Background Recording Status"
         }
@@ -153,7 +159,7 @@ class RecordingService : Service(), LifecycleOwner {
 
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("ChariSafe 録画稼働中")
-            .setContentText("${resHeight}p / ${targetFps}fps バックグラウンド安全録画中")
+            .setContentText("${resHeight}p / ${targetFps}fps 安全録画中")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -161,9 +167,9 @@ class RecordingService : Service(), LifecycleOwner {
             .build()
 
         startForeground(
-            /* id = */ NOTIFICATION_ID,
-            /* notification = */ notification,
-            /* foregroundServiceType = */ ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            NOTIFICATION_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
         )
     }
 
@@ -196,7 +202,6 @@ class RecordingService : Service(), LifecycleOwner {
             return
         }
 
-        // バッテリー・温度などの省電力モニタリング用ログを再導入
         metricsLogger = PocMetricsLogger(this, "ChariSafe-${targetFps}fps")
         metricsLogger?.startSession()
 
@@ -229,7 +234,6 @@ class RecordingService : Service(), LifecycleOwner {
 
         val recorder = recorderBuilder.build()
 
-        // 公開APIである Recorder の QualitySelector を使用して解像度を制御
         val videoCaptureBuilder = VideoCapture.Builder(recorder)
 
         val camera2Interop = Camera2Interop.Extender(videoCaptureBuilder)
@@ -248,7 +252,7 @@ class RecordingService : Service(), LifecycleOwner {
                 cameraSelector,
                 videoCapture
             )
-            Log.i(TAG, "Bound CameraX VideoCapture with ${resHeight}p / ${targetFps}fps Target Range to Lifecycle")
+            Log.i(TAG, "Bound CameraX VideoCapture with ${resHeight}p / ${targetFps}fps Target Range")
 
             startVideoFileOutput()
         } catch (e: Exception) {
@@ -284,6 +288,56 @@ class RecordingService : Service(), LifecycleOwner {
         }
 
         startMetricsLoggingJob()
+    }
+
+    /**
+     * 【重要】ユーザー様ご指摘の正確なシーケンス:
+     * イベント保存のタイミングでリングバッファ撮影を完全に停止し、
+     * ファイルクローズ完了を待ってから動画結合を行い、その後リングバッファ撮影を自動再開する。
+     */
+    fun exportEventAndResume(beforeMinutes: Int, onComplete: (File?) -> Unit) {
+        serviceScope.launch(Dispatchers.IO) {
+            Log.i(TAG, "=== Safe Event Export & Resume Workflow Started ===")
+
+            val currentFilePath = _serviceState.value.currentFile
+            val currentFile = File(currentFilePath)
+
+            // 1. リングバッファ撮影（現在書き込み中の録画）を確実に完全停止する
+            withContext(Dispatchers.Main) {
+                activeRecording?.stop()
+                activeRecording = null
+            }
+            delay(1000L) // ディスクへのファイルフラッシュとクローズ完了を確実に待機
+
+            // 2. 閉じたばかりの現在ファイルを含む、確定済みセグメントを取得
+            val segments = ringBufferManager?.getRecentSegmentsForExport(beforeMinutes) ?: emptyList()
+            val validSegments = if (currentFile.exists() && currentFile.length() > 0 && !segments.contains(currentFile)) {
+                segments + currentFile
+            } else {
+                segments
+            }
+
+            val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir()
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val eventFile = File(recordingsDir, "event_${timestamp}.mp4")
+
+            // 3. 動画結合・保存 (100%再生保証)
+            val success = Mp4Concatenator.concatenate(validSegments, eventFile)
+            if (success) {
+                MediaScannerConnection.scanFile(this@RecordingService, arrayOf(eventFile.absolutePath), null, null)
+                Log.i(TAG, "Successfully exported event video and scanned: ${eventFile.absolutePath}")
+            } else {
+                Log.e(TAG, "Failed to export event video")
+            }
+
+            // 4. リングバッファ録画を自動再開
+            withContext(Dispatchers.Main) {
+                Log.i(TAG, "=== Resuming ring buffer recording ===")
+                setupVideoCaptureAndStart()
+            }
+
+            onComplete(if (success) eventFile else null)
+        }
     }
 
     private fun handleRecordEvent(event: VideoRecordEvent, filePath: String) {

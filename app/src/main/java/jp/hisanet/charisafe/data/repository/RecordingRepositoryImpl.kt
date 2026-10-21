@@ -6,22 +6,18 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
 import android.util.Log
-import jp.hisanet.charisafe.data.local.ringbuffer.Mp4Concatenator
-import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
 import jp.hisanet.charisafe.data.service.RecordingService
 import jp.hisanet.charisafe.domain.model.AppConfig
 import jp.hisanet.charisafe.domain.model.RecordingState
 import jp.hisanet.charisafe.domain.repository.RecordingRepository
-import jp.hisanet.charisafe.util.FileUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import kotlin.coroutines.resume
 
 class RecordingRepositoryImpl(private val context: Context) : RecordingRepository {
 
@@ -31,7 +27,6 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
 
     private var recordingService: RecordingService? = null
     private var isBound = false
-    private var ringBufferManager: RingBufferManager? = null
 
     private val _recordingState = MutableStateFlow(RecordingState.IDLE)
     override val recordingState: StateFlow<RecordingState> = _recordingState.asStateFlow()
@@ -57,13 +52,12 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
     }
 
     override fun startRecording(config: AppConfig) {
-        ringBufferManager = RingBufferManager(config.ringBufferMinutes)
-
         val startIntent = Intent(context, RecordingService::class.java).apply {
             action = RecordingService.ACTION_START_RECORDING
             putExtra(RecordingService.EXTRA_TARGET_FPS, config.fps)
             putExtra(RecordingService.EXTRA_RESOLUTION_WIDTH, config.resolution.width)
             putExtra(RecordingService.EXTRA_RESOLUTION_HEIGHT, config.resolution.height)
+            putExtra(RecordingService.EXTRA_AUDIO_ENABLED, config.audioEnabled)
         }
         context.startForegroundService(startIntent)
         _recordingState.value = RecordingState.RECORDING
@@ -75,43 +69,35 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
             action = RecordingService.ACTION_STOP_RECORDING
         }
         context.startService(stopIntent)
-        ringBufferManager?.clearAll()
-        ringBufferManager = null
         _recordingState.value = RecordingState.IDLE
         Log.i(TAG, "Stopped recording")
     }
 
     override suspend fun saveManualEvent(beforeMinutes: Int): File? = withContext(Dispatchers.IO) {
         _recordingState.value = RecordingState.EXPORTING
-        val ringManager = ringBufferManager
-        if (ringManager == null) {
-            Log.e(TAG, "RingBufferManager is null during manual event export")
+        val service = recordingService
+        if (service == null) {
+            Log.e(TAG, "RecordingService is not bound during manual event export")
             _recordingState.value = RecordingState.RECORDING
             return@withContext null
         }
 
         try {
-            // ディスクから直近のセグメントを直接取得 (起動直後でも今ある分すべてを結合対象にする)
-            val segments = ringManager.getRecentSegmentsForExport(beforeMinutes)
-            if (segments.isEmpty()) {
-                Log.w(TAG, "No ring buffer segments available for export yet")
-                _recordingState.value = RecordingState.RECORDING
-                return@withContext null
+            // ご指定の正確なシーケンス:
+            // サービス側でリングバッファ撮影を確実に停止・クローズしてから動画結合を行い、その後リングバッファ撮影を再開する
+            val eventFile = suspendCancellableCoroutine<File?> { continuation ->
+                service.exportEventAndResume(beforeMinutes) { file ->
+                    continuation.resume(file)
+                }
             }
-
-            val recordingsDir = FileUtils.getRecordingsDir()
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val eventFile = File(recordingsDir, "event_${timestamp}.mp4")
-
-            val success = Mp4Concatenator.concatenate(segments, eventFile)
 
             _recordingState.value = RecordingState.RECORDING
 
-            if (success) {
-                Log.i(TAG, "Successfully saved manual event video instantly: ${eventFile.absolutePath}")
+            if (eventFile != null) {
+                Log.i(TAG, "Successfully exported manual event video: ${eventFile.absolutePath}")
                 eventFile
             } else {
-                Log.e(TAG, "Failed to save manual event video")
+                Log.e(TAG, "Failed to export manual event video")
                 null
             }
         } catch (e: Exception) {
