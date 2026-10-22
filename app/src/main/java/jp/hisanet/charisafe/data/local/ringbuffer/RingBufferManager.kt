@@ -3,6 +3,9 @@ package jp.hisanet.charisafe.data.local.ringbuffer
 import android.util.Log
 import jp.hisanet.charisafe.util.FileUtils
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class RingBufferManager(private val ringBufferMinutes: Int = 5) {
 
@@ -12,11 +15,11 @@ class RingBufferManager(private val ringBufferMinutes: Int = 5) {
 
     fun createNextSegmentFile(): File {
         val dir = FileUtils.getRingBufferDir()
-        val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val segmentFile = File(dir, "seg_${timestamp}.mp4")
 
         purgeOldSegments(dir)
-        Log.i(TAG, "Prepared next segment file: ${segmentFile.name}")
+        Log.i(TAG, "Prepared next segment file: ${segmentFile.name}, ringBufferMinutes: $ringBufferMinutes")
         return segmentFile
     }
 
@@ -26,15 +29,14 @@ class RingBufferManager(private val ringBufferMinutes: Int = 5) {
                 ?.sortedBy { it.lastModified() }
                 ?: return
 
-            // 保持する最大セグメント数 (リングバッファ時間 + 余裕1分)
-            val maxSegments = ringBufferMinutes + 2
-            if (files.size > maxSegments) {
-                val excess = files.size - maxSegments
+            val maxFiles = ringBufferMinutes.coerceAtLeast(1) + 1
+            if (files.size > maxFiles) {
+                val excess = files.size - maxFiles
                 for (i in 0 until excess) {
                     val oldFile = files[i]
                     if (oldFile.exists()) {
                         val deleted = oldFile.delete()
-                        Log.d(TAG, "Purged old segment file: ${oldFile.name}, deleted=$deleted")
+                        Log.i(TAG, "Purged old ring buffer segment: ${oldFile.name}, deleted=$deleted")
                     }
                 }
             }
@@ -47,30 +49,26 @@ class RingBufferManager(private val ringBufferMinutes: Int = 5) {
         val dir = FileUtils.getRingBufferDir()
         try {
             val files = dir.listFiles { _, name -> name.startsWith("seg_") && name.endsWith(".mp4") }
-                ?.filter { it.exists() && it.length() > 0 }
+                ?.filter { it.exists() && it.length() > 100 * 1024 }
                 ?.sortedBy { it.lastModified() }
                 ?: emptyList()
 
-            // 指定された分数（または現在あるすべてのファイル）を取得
-            val targetCount = beforeMinutes.coerceAtMost(files.size).coerceAtLeast(1)
-            val result = files.takeLast(targetCount)
+            if (files.isEmpty()) return emptyList()
 
-            Log.i(TAG, "Found ${result.size} segments in disk for event export (total in dir: ${files.size})")
+            val completedFiles = if (files.size > 1) {
+                files.dropLast(1)
+            } else {
+                files
+            }
+
+            val targetCount = beforeMinutes.coerceAtMost(completedFiles.size).coerceAtLeast(1)
+            val result = completedFiles.takeLast(targetCount)
+
+            Log.i(TAG, "Selected ${result.size} segments for export (beforeMinutes=$beforeMinutes, total available: ${files.size})")
             return result
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get recent segments from disk", e)
             return emptyList()
-        }
-    }
-
-    fun clearAll() {
-        val dir = FileUtils.getRingBufferDir()
-        try {
-            dir.listFiles { _, name -> name.startsWith("seg_") && name.endsWith(".mp4") }
-                ?.forEach { it.delete() }
-            Log.i(TAG, "Cleared all ring buffer segment files")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to clear ring buffer files", e)
         }
     }
 }
