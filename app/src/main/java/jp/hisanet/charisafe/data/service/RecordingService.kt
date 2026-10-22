@@ -42,6 +42,7 @@ import jp.hisanet.charisafe.R
 import jp.hisanet.charisafe.data.camera.RearApproachDetector
 import jp.hisanet.charisafe.data.local.ringbuffer.Mp4Concatenator
 import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
+import jp.hisanet.charisafe.data.sensor.AudioImpactDetector
 import jp.hisanet.charisafe.data.sensor.CollisionDropDetector
 import jp.hisanet.charisafe.data.sensor.PocketStorageDetector
 import jp.hisanet.charisafe.domain.model.ActiveCamera
@@ -97,6 +98,7 @@ class RecordingService : Service(), LifecycleOwner {
     private var ringBufferManager: RingBufferManager? = null
     private var pocketStorageDetector: PocketStorageDetector? = null
     private var collisionDropDetector: CollisionDropDetector? = null
+    private var audioImpactDetector: AudioImpactDetector? = null
 
     private var activeCamera: ActiveCamera = ActiveCamera.REAR
     private var ringBufferMinutes: Int = 5
@@ -104,7 +106,7 @@ class RecordingService : Service(), LifecycleOwner {
     private var userConfigFps: Int = 10
     private var resWidth: Int = 1280
     private var resHeight: Int = 720
-    private var audioEnabled: Boolean = false
+    private var audioEnabled: Boolean = true
 
     private var metricsLogger: PocMetricsLogger? = null
     private var metricsJob: Job? = null
@@ -129,7 +131,6 @@ class RecordingService : Service(), LifecycleOwner {
         ringBufferManager = RingBufferManager(ringBufferMinutes)
         createNotificationChannel()
 
-        // Priority 3: ポケット収納検知
         pocketStorageDetector = PocketStorageDetector(this) { isStored ->
             if (isStored) {
                 Log.w(TAG, "👝 [Priority3] ポケット収納検知: 省電力モードのためFPSを5fpsにスロットリングします")
@@ -140,10 +141,14 @@ class RecordingService : Service(), LifecycleOwner {
             }
         }
 
-        // 衝突・落下検知 (ジャイロ/加速度)
         collisionDropDetector = CollisionDropDetector(this) {
             Log.w(TAG, "💥 衝突・落下検知トリガー受領 -> 警告音＋自動イベント保存を実行します")
             triggerAutoEventWithAlert("衝突・落下検知")
+        }
+
+        audioImpactDetector = AudioImpactDetector {
+            Log.w(TAG, "💥 [AudioImpact] 大きな音(衝突音)検知トリガー受領 -> 警告音＋自動イベント保存を実行します")
+            triggerAutoEventWithAlert("大きな音(衝突音)検知")
         }
     }
 
@@ -156,7 +161,7 @@ class RecordingService : Service(), LifecycleOwner {
         userConfigFps = targetFps
         resWidth = intent?.getIntExtra(EXTRA_RESOLUTION_WIDTH, 1280) ?: 1280
         resHeight = intent?.getIntExtra(EXTRA_RESOLUTION_HEIGHT, 720) ?: 720
-        audioEnabled = intent?.getBooleanExtra(EXTRA_AUDIO_ENABLED, false) ?: false
+        audioEnabled = intent?.getBooleanExtra(EXTRA_AUDIO_ENABLED, true) ?: true
 
         ringBufferManager = RingBufferManager(ringBufferMinutes)
 
@@ -168,11 +173,13 @@ class RecordingService : Service(), LifecycleOwner {
                 acquireWakeLock()
                 pocketStorageDetector?.startListening()
                 collisionDropDetector?.startListening()
+                audioImpactDetector?.startListening(this)
                 startRecordingPipeline()
             }
             ACTION_STOP_RECORDING -> {
                 pocketStorageDetector?.stopListening()
                 collisionDropDetector?.stopListening()
+                audioImpactDetector?.stopListening()
                 stopRecordingPipeline()
                 stopForegroundAndSelf()
             }
@@ -203,9 +210,9 @@ class RecordingService : Service(), LifecycleOwner {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val camLabel = if (activeCamera == ActiveCamera.REAR) "後方(リア)" else "前方(フロント)"
+        val audioLabel = if (audioEnabled) "音声+映像" else "映像のみ"
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("ChariSafe 録画稼働中 ($camLabel)")
+            .setContentTitle("ChariSafe 録画稼働中 ($audioLabel)")
             .setContentText("${resHeight}p / ${targetFps}fps 安全録画中")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
@@ -305,8 +312,8 @@ class RecordingService : Service(), LifecycleOwner {
                 .build()
                 .apply {
                     setAnalyzer(analysisExecutor, RearApproachDetector {
-                        Log.w(TAG, "🚨 [Priority2] 後方接近検知発火 -> 警告音＋自動イベント保存を実行します")
-                        triggerAutoEventWithAlert("後方接近検知")
+                        Log.w(TAG, "🚨 [Priority2] 接近検知発火 -> 警告音＋自動イベント保存を実行します")
+                        triggerAutoEventWithAlert("接近検知")
                     })
                 }
 
@@ -316,7 +323,7 @@ class RecordingService : Service(), LifecycleOwner {
                 videoCapture,
                 imageAnalysis
             )
-            Log.i(TAG, "Bound CameraX VideoCapture + ApproachAnalyzer ($activeCamera) at targetFps=$targetFps")
+            Log.i(TAG, "Bound CameraX VideoCapture + Analyzer ($activeCamera) at targetFps=$targetFps")
 
             startVideoFileOutput()
         } catch (e: Exception) {
@@ -345,6 +352,9 @@ class RecordingService : Service(), LifecycleOwner {
         if (audioEnabled && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             @SuppressLint("MissingPermission")
             pendingRecording.withAudioEnabled()
+            Log.i(TAG, "Microphone audio recording is ENABLED")
+        } else {
+            Log.i(TAG, "Microphone audio recording is DISABLED")
         }
 
         activeRecording = pendingRecording.start(ContextCompat.getMainExecutor(this)) { event ->
@@ -354,12 +364,7 @@ class RecordingService : Service(), LifecycleOwner {
         startMetricsLoggingJob()
     }
 
-    /**
-     * 【統一された自動検知アクション】
-     * 警告音 (ToneGenerator) を鳴らした上で、非同期作業ディレクトリ退避方式によるイベント保存を実行する。
-     */
     fun triggerAutoEventWithAlert(reason: String) {
-        // 1. 警告音鳴動 (ビープ音)
         try {
             toneGenerator.startTone(ToneGenerator.TONE_DTMF_S, 800)
             Log.i(TAG, "🔊 警告音鳴動 ($reason)")
@@ -367,7 +372,6 @@ class RecordingService : Service(), LifecycleOwner {
             Log.e(TAG, "Failed to play alert tone", e)
         }
 
-        // 2. イベント保存実行
         exportEventAsync(ringBufferMinutes) { file ->
             if (file != null) {
                 Log.i(TAG, "✨ Auto-saved event video for [$reason]: ${file.absolutePath}")
@@ -496,6 +500,7 @@ class RecordingService : Service(), LifecycleOwner {
     override fun onDestroy() {
         pocketStorageDetector?.stopListening()
         collisionDropDetector?.stopListening()
+        audioImpactDetector?.stopListening()
         analysisExecutor.shutdown()
         toneGenerator.release()
         stopRecordingPipeline()
