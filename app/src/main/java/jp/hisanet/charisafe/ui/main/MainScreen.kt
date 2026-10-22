@@ -52,6 +52,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import jp.hisanet.charisafe.domain.model.ActiveCamera
 import jp.hisanet.charisafe.domain.model.RecordingState
 import jp.hisanet.charisafe.domain.model.VideoResolution
+import kotlinx.coroutines.delay
 import java.io.File
 import java.util.Locale
 
@@ -72,7 +73,7 @@ fun MainScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 hasCameraAudioPermissions = checkCameraAudioPermissions(context)
                 hasLocationPermission = checkLocationPermission(context)
-                viewModel.loadExistingEvents() // 画面復帰時に保存済みイベントファイル一覧を自動再スキャン
+                viewModel.loadExistingEvents()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -124,9 +125,17 @@ fun MainScreen(
     var previousListSize by remember { mutableIntStateOf(uiState.savedEventFiles.size) }
     LaunchedEffect(uiState.savedEventFiles.size) {
         if (uiState.savedEventFiles.size > previousListSize) {
-            Toast.makeText(context, "✨ イベント動画を即時保存しました！", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "✨ イベント動画を保存しました！", Toast.LENGTH_LONG).show()
         }
         previousListSize = uiState.savedEventFiles.size
+    }
+
+    // バックグラウンドでの自動保存（接近検知・急減速等）を定期的に自動スキャンしてリストに反映するポーリング
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(3000L) // 3秒おきにファイル一覧を自動再スキャン
+            viewModel.loadExistingEvents()
+        }
     }
 
     LaunchedEffect(Unit) {

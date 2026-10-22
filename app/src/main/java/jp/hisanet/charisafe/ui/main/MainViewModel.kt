@@ -89,8 +89,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val files = recordingsDir.listFiles { _, name -> name.startsWith("event_") && name.endsWith(".mp4") }
                     ?.sortedByDescending { it.lastModified() }
                     ?: emptyList()
+                
+                // リストに差分がある、または最新化が必要な場合に更新
                 _savedEventFiles.value = files
-                Log.i(TAG, "Loaded ${files.size} existing event videos from storage")
+                Log.i(TAG, "Loaded ${files.size} event videos from storage")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load existing events", e)
             }
@@ -110,11 +112,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun triggerManualEvent() {
         viewModelScope.launch {
-            Log.i(TAG, "Triggering manual/automatic event export...")
+            Log.i(TAG, "Triggering event export (manual or automatic)...")
             val eventFile = saveManualEventUseCase.execute()
             if (eventFile != null) {
                 Log.i(TAG, "Event successfully saved to: ${eventFile.absolutePath}")
-                loadExistingEvents() // リストを最新化
+                loadExistingEvents() // 即座に最新リストを再スキャンして反映
                 _selectedEventFile.value = eventFile
             } else {
                 Log.e(TAG, "Event export returned null file")
