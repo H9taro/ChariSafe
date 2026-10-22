@@ -40,6 +40,7 @@ import jp.hisanet.charisafe.R
 import jp.hisanet.charisafe.data.camera.RearApproachDetector
 import jp.hisanet.charisafe.data.local.ringbuffer.Mp4Concatenator
 import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
+import jp.hisanet.charisafe.data.sensor.PocketStorageDetector
 import jp.hisanet.charisafe.domain.model.ActiveCamera
 import jp.hisanet.charisafe.poc.PocMetricsLogger
 import kotlinx.coroutines.CoroutineScope
@@ -91,10 +92,12 @@ class RecordingService : Service(), LifecycleOwner {
     private var imageAnalysis: ImageAnalysis? = null
     private var activeRecording: Recording? = null
     private var ringBufferManager: RingBufferManager? = null
+    private var pocketStorageDetector: PocketStorageDetector? = null
 
     private var activeCamera: ActiveCamera = ActiveCamera.REAR
     private var ringBufferMinutes: Int = 5
     private var targetFps: Int = 10
+    private var userConfigFps: Int = 10
     private var resWidth: Int = 1280
     private var resHeight: Int = 720
     private var audioEnabled: Boolean = false
@@ -120,6 +123,17 @@ class RecordingService : Service(), LifecycleOwner {
 
         ringBufferManager = RingBufferManager(ringBufferMinutes)
         createNotificationChannel()
+
+        // Priority 3: ポケット収納検知の初期化 (省電力スロットリング)
+        pocketStorageDetector = PocketStorageDetector(this) { isStored ->
+            if (isStored) {
+                Log.w(TAG, "👝 [Priority3] ポケット収納検知: 省電力モードのためFPSを5fpsにスロットリングします")
+                targetFps = 5
+            } else {
+                Log.i(TAG, "☀️ [Priority3] ポケットから取り出されました: 通常FPS ($userConfigFps fps) に復帰します")
+                targetFps = userConfigFps
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -128,21 +142,24 @@ class RecordingService : Service(), LifecycleOwner {
         activeCamera = try { ActiveCamera.valueOf(camName) } catch (e: Exception) { ActiveCamera.REAR }
         ringBufferMinutes = intent?.getIntExtra(EXTRA_RING_BUFFER_MINUTES, 5) ?: 5
         targetFps = intent?.getIntExtra(EXTRA_TARGET_FPS, 10) ?: 10
+        userConfigFps = targetFps
         resWidth = intent?.getIntExtra(EXTRA_RESOLUTION_WIDTH, 1280) ?: 1280
         resHeight = intent?.getIntExtra(EXTRA_RESOLUTION_HEIGHT, 720) ?: 720
         audioEnabled = intent?.getBooleanExtra(EXTRA_AUDIO_ENABLED, false) ?: false
 
         ringBufferManager = RingBufferManager(ringBufferMinutes)
 
-        Log.i(TAG, "onStartCommand action: $action, camera: $activeCamera, ringBufferMinutes: $ringBufferMinutes")
+        Log.i(TAG, "onStartCommand action: $action, camera: $activeCamera, targetFps: $targetFps")
 
         when (action) {
             ACTION_START_RECORDING -> {
                 startForegroundWithNotification()
                 acquireWakeLock()
+                pocketStorageDetector?.startListening()
                 startRecordingPipeline()
             }
             ACTION_STOP_RECORDING -> {
+                pocketStorageDetector?.stopListening()
                 stopRecordingPipeline()
                 stopForegroundAndSelf()
             }
@@ -270,7 +287,6 @@ class RecordingService : Service(), LifecycleOwner {
         try {
             provider.unbindAll()
 
-            // カメラに依存せず、常に ImageAnalysis (接近・急変動検知) を VideoCapture と同時にバインド
             imageAnalysis = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
@@ -289,7 +305,7 @@ class RecordingService : Service(), LifecycleOwner {
                 videoCapture,
                 imageAnalysis
             )
-            Log.i(TAG, "Bound CameraX VideoCapture + ApproachAnalyzer ($activeCamera)")
+            Log.i(TAG, "Bound CameraX VideoCapture + ApproachAnalyzer ($activeCamera) at targetFps=$targetFps")
 
             startVideoFileOutput()
         } catch (e: Exception) {
@@ -444,6 +460,7 @@ class RecordingService : Service(), LifecycleOwner {
     }
 
     override fun onDestroy() {
+        pocketStorageDetector?.stopListening()
         analysisExecutor.shutdown()
         stopRecordingPipeline()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
