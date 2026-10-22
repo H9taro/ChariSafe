@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import jp.hisanet.charisafe.data.gpx.GpxFileWriter
 import jp.hisanet.charisafe.data.location.LocationTracker
+import jp.hisanet.charisafe.data.location.SpeedDecelerationDetector
 import jp.hisanet.charisafe.domain.model.GpxPoint
 import jp.hisanet.charisafe.domain.repository.GpxRepository
 import jp.hisanet.charisafe.util.FileUtils
@@ -29,6 +30,13 @@ class GpxRepositoryImpl(context: Context) : GpxRepository {
     private var collectJob: Job? = null
     private val repositoryScope = CoroutineScope(Dispatchers.IO + Job())
 
+    var onDecelerationDetected: (() -> Unit)? = null
+
+    private val decelerationDetector = SpeedDecelerationDetector {
+        Log.w(TAG, "🚨 急減速検知コールバック発火 -> 自動イベント保存を実行します")
+        onDecelerationDetected?.invoke()
+    }
+
     override val currentGpxPoint: StateFlow<GpxPoint?>
         get() = locationTracker.currentLocation
 
@@ -46,6 +54,7 @@ class GpxRepositoryImpl(context: Context) : GpxRepository {
             locationTracker.currentLocation.collect { point ->
                 if (point != null) {
                     gpxWriter?.appendPoint(point)
+                    decelerationDetector.feedPoint(point)
                 }
             }
         }
