@@ -1,9 +1,15 @@
 package jp.hisanet.charisafe.domain.model
 
+enum class ActiveCamera {
+    REAR,  // 後方 (リアカメラ)
+    FRONT  // 前方 (フロントカメラ)
+}
+
 data class AppConfig(
+    val activeCamera: ActiveCamera = ActiveCamera.REAR,
     val fps: Int = 10,
     val gpsIntervalSeconds: Long = 30L,
     val ringBufferMinutes: Int = 5,
     val resolution: VideoResolution = VideoResolution.HD_720P,
-    val audioEnabled: Boolean = false // デフォルトは風切り音防止・マイク不要の音声なし録画
+    val audioEnabled: Boolean = false
 )

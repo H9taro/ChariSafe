@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import jp.hisanet.charisafe.data.config.ConfigRepositoryImpl
 import jp.hisanet.charisafe.data.repository.GpxRepositoryImpl
 import jp.hisanet.charisafe.data.repository.RecordingRepositoryImpl
+import jp.hisanet.charisafe.domain.model.ActiveCamera
 import jp.hisanet.charisafe.domain.model.AppConfig
 import jp.hisanet.charisafe.domain.model.RecordingState
 import jp.hisanet.charisafe.domain.model.SystemStatus
@@ -136,6 +137,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _selectedEventFile.value = null
             }
         }
+    }
+
+    fun updateActiveCamera(activeCamera: ActiveCamera) {
+        val current = configRepository.getConfig()
+        configRepository.updateConfig(current.copy(activeCamera = activeCamera))
     }
 
     fun updateFps(fps: Int) {

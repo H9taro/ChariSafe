@@ -71,4 +71,15 @@ class RingBufferManager(private val ringBufferMinutes: Int = 5) {
             return emptyList()
         }
     }
+
+    fun clearAll() {
+        val dir = FileUtils.getRingBufferDir()
+        try {
+            dir.listFiles { _, name -> name.startsWith("seg_") && name.endsWith(".mp4") }
+                ?.forEach { it.delete() }
+            Log.i(TAG, "Cleared all ring buffer segment files")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to clear ring buffer files", e)
+        }
+    }
 }

@@ -54,6 +54,7 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
     override fun startRecording(config: AppConfig) {
         val startIntent = Intent(context, RecordingService::class.java).apply {
             action = RecordingService.ACTION_START_RECORDING
+            putExtra(RecordingService.EXTRA_ACTIVE_CAMERA, config.activeCamera.name)
             putExtra(RecordingService.EXTRA_TARGET_FPS, config.fps)
             putExtra(RecordingService.EXTRA_RESOLUTION_WIDTH, config.resolution.width)
             putExtra(RecordingService.EXTRA_RESOLUTION_HEIGHT, config.resolution.height)
@@ -61,7 +62,7 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
         }
         context.startForegroundService(startIntent)
         _recordingState.value = RecordingState.RECORDING
-        Log.i(TAG, "Started recording with config: $config")
+        Log.i(TAG, "Started recording with active camera: ${config.activeCamera}, config: $config")
     }
 
     override fun stopRecording() {
@@ -83,10 +84,8 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
         }
 
         try {
-            // ご指定の正確なシーケンス:
-            // サービス側でリングバッファ撮影を確実に停止・クローズしてから動画結合を行い、その後リングバッファ撮影を再開する
             val eventFile = suspendCancellableCoroutine { continuation ->
-                service.exportEventAndResume(beforeMinutes) { file ->
+                service.exportEventAsync(beforeMinutes) { file ->
                     continuation.resume(file)
                 }
             }

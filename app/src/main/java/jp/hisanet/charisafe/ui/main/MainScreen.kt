@@ -49,6 +49,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import jp.hisanet.charisafe.domain.model.ActiveCamera
 import jp.hisanet.charisafe.domain.model.RecordingState
 import jp.hisanet.charisafe.domain.model.VideoResolution
 import java.io.File
@@ -219,7 +220,7 @@ fun MainScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // System Status Card & Settings (プルダウン変更対応)
+        // System Status Card & Settings (プルダウン対応)
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
@@ -230,7 +231,7 @@ fun MainScreen(
 
                 "ステータス".RowStatusItem(
                     value = when (uiState.status.state) {
-                        RecordingState.RECORDING -> "🔴 リングバッファ録画中"
+                        RecordingState.RECORDING -> "🔴 録画中 [${if (uiState.config.activeCamera == ActiveCamera.REAR) "後方(リア)" else "前方(フロント)"}]"
                         RecordingState.EXPORTING -> "⚡ 過去ログを即時結合中..."
                         RecordingState.PREPARING -> "⏳ 準備中..."
                         RecordingState.SLEEP -> "🌙 スリープ中"
@@ -241,6 +242,16 @@ fun MainScreen(
                 )
 
                 Spacer(modifier = Modifier.height(6.dp))
+
+                // 0. 撮影カメラ選択 (後方 / 前方) プルダウン
+                DropdownSettingItem(
+                    label = "撮影カメラ",
+                    currentValue = if (uiState.config.activeCamera == ActiveCamera.REAR) "後方 (リアカメラ)" else "前方 (フロントカメラ)",
+                    options = ActiveCamera.entries,
+                    optionLabel = { if (it == ActiveCamera.REAR) "後方 (リアカメラ)" else "前方 (フロントカメラ)" },
+                    enabled = !isRecording,
+                    onSelected = { viewModel.updateActiveCamera(it) }
+                )
 
                 // 1. リングバッファ時間 プルダウン
                 DropdownSettingItem(
