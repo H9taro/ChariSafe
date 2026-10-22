@@ -21,6 +21,7 @@ import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.Quality
@@ -36,6 +37,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import jp.hisanet.charisafe.MainActivity
 import jp.hisanet.charisafe.R
+import jp.hisanet.charisafe.data.camera.RearApproachDetector
 import jp.hisanet.charisafe.data.local.ringbuffer.Mp4Concatenator
 import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
 import jp.hisanet.charisafe.domain.model.ActiveCamera
@@ -51,6 +53,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
 
 class RecordingService : Service(), LifecycleOwner {
 
@@ -85,6 +88,7 @@ class RecordingService : Service(), LifecycleOwner {
     private var wakeLock: PowerManager.WakeLock? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var videoCapture: VideoCapture<Recorder>? = null
+    private var imageAnalysis: ImageAnalysis? = null
     private var activeRecording: Recording? = null
     private var ringBufferManager: RingBufferManager? = null
 
@@ -97,6 +101,8 @@ class RecordingService : Service(), LifecycleOwner {
 
     private var metricsLogger: PocMetricsLogger? = null
     private var metricsJob: Job? = null
+
+    private val analysisExecutor = Executors.newSingleThreadExecutor()
 
     private val _serviceState = MutableStateFlow(ServiceState())
 
@@ -128,7 +134,7 @@ class RecordingService : Service(), LifecycleOwner {
 
         ringBufferManager = RingBufferManager(ringBufferMinutes)
 
-        Log.i(TAG, "onStartCommand action: $action, camera: $activeCamera, ringBufferMinutes: $ringBufferMinutes, targetFps: $targetFps")
+        Log.i(TAG, "onStartCommand action: $action, camera: $activeCamera, ringBufferMinutes: $ringBufferMinutes")
 
         when (action) {
             ACTION_START_RECORDING -> {
@@ -213,10 +219,7 @@ class RecordingService : Service(), LifecycleOwner {
             return
         }
 
-        // 【重要】新しい録画セッション開始時、過去の異なるカメラや古い走行セグメントファイルを完全にクリアして混入を防ぐ
         ringBufferManager?.clearAll()
-        Log.i(TAG, "Cleared all previous ring buffer segments on new recording start")
-
         metricsLogger = PocMetricsLogger(this, "ChariSafe-${targetFps}fps")
         metricsLogger?.startSession()
 
@@ -266,12 +269,27 @@ class RecordingService : Service(), LifecycleOwner {
 
         try {
             provider.unbindAll()
+
+            // カメラに依存せず、常に ImageAnalysis (接近・急変動検知) を VideoCapture と同時にバインド
+            imageAnalysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+                .apply {
+                    setAnalyzer(analysisExecutor, RearApproachDetector {
+                        Log.w(TAG, "🚨 [Priority2] 接近検知発火 -> 自動イベント保存を実行します")
+                        exportEventAsync(ringBufferMinutes) { file ->
+                            Log.i(TAG, "Auto-saved event video on approach: ${file?.absolutePath}")
+                        }
+                    })
+                }
+
             provider.bindToLifecycle(
                 this,
                 cameraSelector,
-                videoCapture
+                videoCapture,
+                imageAnalysis
             )
-            Log.i(TAG, "Bound CameraX VideoCapture ($activeCamera) with ${resHeight}p / ${targetFps}fps Target Range")
+            Log.i(TAG, "Bound CameraX VideoCapture + ApproachAnalyzer ($activeCamera)")
 
             startVideoFileOutput()
         } catch (e: Exception) {
@@ -320,7 +338,7 @@ class RecordingService : Service(), LifecycleOwner {
                 activeRecording?.stop()
                 activeRecording = null
             }
-            delay(timeMillis = 500L)
+            delay(500L)
 
             val segments = ringBufferManager?.getRecentSegmentsForExport(beforeMinutes) ?: emptyList()
             val validSegments = if (currentFile.exists() && currentFile.length() > 0 && !segments.contains(currentFile)) {
@@ -426,6 +444,7 @@ class RecordingService : Service(), LifecycleOwner {
     }
 
     override fun onDestroy() {
+        analysisExecutor.shutdown()
         stopRecordingPipeline()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
