@@ -85,7 +85,7 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
         try {
             // ご指定の正確なシーケンス:
             // サービス側でリングバッファ撮影を確実に停止・クローズしてから動画結合を行い、その後リングバッファ撮影を再開する
-            val eventFile = suspendCancellableCoroutine<File?> { continuation ->
+            val eventFile = suspendCancellableCoroutine { continuation ->
                 service.exportEventAndResume(beforeMinutes) { file ->
                     continuation.resume(file)
                 }

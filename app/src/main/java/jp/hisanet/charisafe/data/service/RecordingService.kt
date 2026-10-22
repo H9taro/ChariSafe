@@ -307,7 +307,7 @@ class RecordingService : Service(), LifecycleOwner {
                 activeRecording?.stop()
                 activeRecording = null
             }
-            delay(1000L) // ディスクへのファイルフラッシュとクローズ完了を確実に待機
+            delay(timeMillis = 1000L) // ディスクへのファイルフラッシュとクローズ完了を確実に待機
 
             // 2. 閉じたばかりの現在ファイルを含む、確定済みセグメントを取得
             val segments = ringBufferManager?.getRecentSegmentsForExport(beforeMinutes) ?: emptyList()

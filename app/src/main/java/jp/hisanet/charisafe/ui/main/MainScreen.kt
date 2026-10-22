@@ -228,8 +228,7 @@ fun MainScreen(
                 val isRecording = uiState.status.state == RecordingState.RECORDING
                 val isExporting = uiState.status.state == RecordingState.EXPORTING
 
-                RowStatusItem(
-                    label = "ステータス",
+                "ステータス".RowStatusItem(
                     value = when (uiState.status.state) {
                         RecordingState.RECORDING -> "🔴 リングバッファ録画中"
                         RecordingState.EXPORTING -> "⚡ 過去ログを即時結合中..."
@@ -248,7 +247,7 @@ fun MainScreen(
                     label = "リングバッファ時間",
                     currentValue = "${uiState.config.ringBufferMinutes} 分",
                     options = listOf(3, 5, 10),
-                    optionLabel = { "${it} 分" },
+                    optionLabel = { "$it 分" },
                     enabled = !isRecording,
                     onSelected = { viewModel.updateRingBuffer(it) }
                 )
@@ -258,7 +257,7 @@ fun MainScreen(
                     label = "GPS情報更新間隔",
                     currentValue = "${uiState.config.gpsIntervalSeconds} 秒",
                     options = listOf(1L, 5L, 10L, 30L),
-                    optionLabel = { "${it} 秒" },
+                    optionLabel = { "$it 秒" },
                     enabled = !isRecording,
                     onSelected = { viewModel.updateGpsInterval(it) }
                 )
@@ -268,7 +267,7 @@ fun MainScreen(
                     label = "撮影 FPS",
                     currentValue = "${uiState.config.fps} fps",
                     options = listOf(5, 10, 15),
-                    optionLabel = { "${it} fps" },
+                    optionLabel = { "$it fps" },
                     enabled = !isRecording,
                     onSelected = { viewModel.updateFps(it) }
                 )
@@ -463,14 +462,14 @@ fun <T> DropdownSettingItem(
 }
 
 @Composable
-private fun RowStatusItem(label: String, value: String, color: Color = Color.Unspecified) {
+private fun String.RowStatusItem(value: String, color: Color = Color.Unspecified) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(text = label, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+        Text(text = this@RowStatusItem, fontWeight = FontWeight.Medium, fontSize = 14.sp)
         Text(text = value, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = color)
     }
 }
