@@ -1,4 +1,4 @@
-# ChariSafe アーキテクチャ仕様書 (Phase2 完了版)
+# ChariSafe アーキテクチャ仕様書 (Phase2 最終完了版)
 
 本書は、自転車用セーフティレコーダー「ChariSafe」の MVP および Phase2 で実装されたシステム全体アーキテクチャ、コンポーネント設計、データフロー、およびストレージ構造を定義するものである。
 
@@ -22,7 +22,7 @@ ChariSafe は、長期のバックグラウンド稼働における安定性と�
 
 ### 2.1 Domain 層
 - **Models**:
-  - `AppConfig`: 撮影設定（FPS、GPS間隔、リングバッファ時間、解像度、音声有効、アクティブカメラ選択）。
+  - `AppConfig`: 撮影設定（FPS、GPS間隔、リングバッファ時間、解像度、音声有効（デフォルト有効）、アクティブカメラ選択）。
   - `GpxPoint`: 位置情報・速度・タイムスタンプモデル。
   - `SystemStatus` / `RecordingState`: サービスの状態（IDLE, RECORDING, EXPORTING, ERROR）。
 - **Repositories (インターフェース)**:
@@ -36,16 +36,17 @@ ChariSafe は、長期のバックグラウンド稼働における安定性と�
 - **Foreground Service (`RecordingService`)**:
   - `FOREGROUND_SERVICE_TYPE_CAMERA` 権限を利用した堅牢なバックグラウンド常時録画。
   - `PARTIAL_WAKE_LOCK` によるスリープ時の中断防止。
-  - CameraX `VideoCapture` (H.265 / 720p / 10fps) と `ImageAnalysis` (接近検知) のライフサイクル統合管理。
+  - CameraX `VideoCapture` (H.265 / 720p / 10fps / マイク音声同時記録) と `ImageAnalysis` (接近検知) のライフサイクル統合管理。
 - **リングバッファマネージャー (`RingBufferManager`)**:
   - 1分ごとのセグメントファイル（`seg_*.mp4`）をローテーション生成。
   - ユーザー設定の `ringBufferMinutes`（例: 3分、5分）を超える古いセグメントをディスクから自動パージ（削除）。
 - **動画結合コンテナ (`Mp4Concatenator`)**:
   - 複数セグメントをタイムスタンプ（PTS）の破綻なくマルチセグメント連結する高信頼コンテナ。
-- **Phase2 インテリジェント検知センサー群**:
+- **Phase2 インテリジェント検知・センサー群**:
   - `SpeedDecelerationDetector`: GPS速度を利用した急減速（15km/h以上から3秒以内に5km/h未満へ急低下）検知。
   - `RearApproachDetector`: CameraX `ImageAnalysis` を利用した夜間・暗所におけるヘッドライト急拡大（後方接近）検知。
   - `CollisionDropDetector`: 加速度センサーによる衝突・落下（$\ge 3.0G$）検知。
+  - `AudioImpactDetector`: マイクロフォン音声のリアルタイム解析による大音量（衝突音・クラクション）検知。
   - `PocketStorageDetector`: 近接センサーによるポケット・バッグ収納検知（省電力FPSスロットリング）。
 
 ---
