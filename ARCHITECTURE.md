@@ -1,86 +1,76 @@
-# ChariSafe システムアーキテクチャ設計書 (MVP & 将来拡張設計)
+# ChariSafe アーキテクチャ仕様書 (Phase2 完了版)
 
-## 1. 概要と基本コンセプト
-
-ChariSafe は、自転車ライドにおける長時間の安全を保障する「自転車向けセーフティレコーダー」アプリである。
-一般的な車載ドライブレコーダーのような常時録画ファイル出力ではなく、**「リングバッファ（インメモリ/セグメント循環）」**および**「イベント発生時の前後抽出保存（指定時間）」**を採用し、バッテリー消費とストレージ消耗を最小限に抑えながら10〜12時間以上の連続運用を実現する。
+本書は、自転車用セーフティレコーダー「ChariSafe」の MVP および Phase2 で実装されたシステム全体アーキテクチャ、コンポーネント設計、データフロー、およびストレージ構造を定義するものである。
 
 ---
 
-## 2. 変更可能な動作パラメータ設定 (`AppConfig`)
+## 1. システム全体設計 (MVVM + Clean Architecture)
 
-以下のパラメータはアプリ設定および `AppConfig` 設定用クラスによって動的に変更可能とする。
+ChariSafe は、長期のバックグラウンド稼働における安定性と省電力性を最優先に設計されており、明確な関心の分離（Separation of Concerns）に基づいたレイヤー構造を採用している。
 
-| パラメータ名 | プロパティ名 | デフォルト値 | 選択肢・推奨値 | 説明 |
-|---|---|---|---|---|
-| **撮影 FPS** | `fps` | **10 fps** | `5`, `10`, `15` fps | 録画フレームレート。PoC結果により 10fps（9.6%/h）を推奨。 |
-| **GPS取得間隔** | `gpsIntervalSeconds` | **30 秒** | `5`, `10`, `30`, `60` 秒 | GPS位置・速度情報の取得・GPX書き出し間隔。 |
-| **リングバッファ時間** | `ringBufferMinutes` | **5 分** | `3`, `5`, `10` 分 | インメモリ/セグメント循環で保持する直前録画時間。 |
-| **録画解像度** | `resolution` | **720p (HD)** | `480p`, `720p`, `1080p` | 映像解像度 (`VideoResolution.HD_720P`) |
-
-### 2.1 パラメータ設定クラス設計 (`AppConfig.kt`)
-```kotlin
-package jp.hisanet.charisafe.domain.model
-
-enum class VideoResolution(val width: Int, val height: Int, val label: String) {
-    SD_480P(640, 480, "480p (SD)"),
-    HD_720P(1280, 720, "720p (HD)"),
-    FHD_1080P(1920, 1080, "1080p (FHD)")
-}
-
-data class AppConfig(
-    val fps: Int = 10,
-    val gpsIntervalSeconds: Long = 30L,
-    val ringBufferMinutes: Int = 5,
-    val resolution: VideoResolution = VideoResolution.HD_720P
-)
+```
+[ UI Layer ] (Jetpack Compose / MainScreen & MainViewModel)
+       ↕
+[ Domain Layer ] (UseCases: SaveManualEventUseCase, Models: AppConfig, GpxPoint, etc.)
+       ↕
+[ Data Layer ] (Repositories, Foreground Service, Sensors, CameraX Pipeline)
 ```
 
 ---
 
-## 3. レイヤー・アーキテクチャ設計 (MVVM + Clean / Repository Pattern)
+## 2. コアモジュール構成
 
-長期保守性と将来機能追加 (Phase 2 〜 Phase 5) を容易にするため、単一責任原則に沿った 3 レイヤー構造を採用する。
+### 2.1 Domain 層
+- **Models**:
+  - `AppConfig`: 撮影設定（FPS、GPS間隔、リングバッファ時間、解像度、音声有効、アクティブカメラ選択）。
+  - `GpxPoint`: 位置情報・速度・タイムスタンプモデル。
+  - `SystemStatus` / `RecordingState`: サービスの状態（IDLE, RECORDING, EXPORTING, ERROR）。
+- **Repositories (インターフェース)**:
+  - `ConfigRepository`: 設定データの永続化・購読。
+  - `GpxRepository`: 位置情報・速度トラッキングおよびGPXファイル書き込み。
+  - `RecordingRepository`: 録画サービスのバインド・制御および手動/自動イベント保存。
+- **Use Cases**:
+  - `SaveManualEventUseCase`: 手動または自動イベント発生時のリングバッファ抽出・保存の調整。
 
-```
- ┌────────────────────────────────────────────────────────┐
- │                      UI Layer                          │
- │  [MainActivity] ───> [MainScreen (Compose)]             │
- │                          │                             │
- │                          ▼                             │
- │                  [MainViewModel]                       │
- └──────────────────────────┬─────────────────────────────┘
-                            │ (StateFlow / Event)
-                            ▼
- ┌────────────────────────────────────────────────────────┐
- │                    Domain Layer                        │
- │  [RecordingUseCase] [EventExportUseCase] [GpxUseCase] │
- │  [GetAppConfigUseCase] [UpdateAppConfigUseCase]       │
- └──────────────────────────┬─────────────────────────────┘
-                            │ (Repository Interface)
-                            ▼
- ┌────────────────────────────────────────────────────────┐
- │                     Data Layer                         │
- │ ┌──────────────────┐ ┌────────────────┐ ┌────────────┐ │
- │ │ConfigRepository  │ │RecordingRepo   │ │GpxRepo     │ │
- │ └────────┬─────────┘ └───────┬────────┘ └─────┬──────┘ │
- │          │                   │                │        │
- │          ▼                   ▼                ▼        │
- │  [SharedPreferences]  [CameraX Pipeline] [Location]    │
- └────────────────────────────────────────────────────────┘
-```
+### 2.2 Data 層 (インフラ・サービス・検知)
+- **Foreground Service (`RecordingService`)**:
+  - `FOREGROUND_SERVICE_TYPE_CAMERA` 権限を利用した堅牢なバックグラウンド常時録画。
+  - `PARTIAL_WAKE_LOCK` によるスリープ時の中断防止。
+  - CameraX `VideoCapture` (H.265 / 720p / 10fps) と `ImageAnalysis` (接近検知) のライフサイクル統合管理。
+- **リングバッファマネージャー (`RingBufferManager`)**:
+  - 1分ごとのセグメントファイル（`seg_*.mp4`）をローテーション生成。
+  - ユーザー設定の `ringBufferMinutes`（例: 3分、5分）を超える古いセグメントをディスクから自動パージ（削除）。
+- **動画結合コンテナ (`Mp4Concatenator`)**:
+  - 複数セグメントをタイムスタンプ（PTS）の破綻なくマルチセグメント連結する高信頼コンテナ。
+- **Phase2 インテリジェント検知センサー群**:
+  - `SpeedDecelerationDetector`: GPS速度を利用した急減速（15km/h以上から3秒以内に5km/h未満へ急低下）検知。
+  - `RearApproachDetector`: CameraX `ImageAnalysis` を利用した夜間・暗所におけるヘッドライト急拡大（後方接近）検知。
+  - `CollisionDropDetector`: 加速度センサーによる衝突・落下（$\ge 3.0G$）検知。
+  - `PocketStorageDetector`: 近接センサーによるポケット・バッグ収納検知（省電力FPSスロットリング）。
 
 ---
 
-## 4. リングバッファ & イベント保存機構
+## 3. イベント保存の非同期高速パイプライン (作業ディレクトリ退避方式)
 
-- **リングバッファ構造**: `AppConfig.ringBufferMinutes` (例: 5分) に基づき、1分単位セグメント動画を動的保持・循環破棄。
-- **イベント保存時**: イベント発生時に「指定された直近 N 分間 (例: 5分)」＋「発生後 1 分間」の動画を1本の MP4 ファイルとして切り出し出力。
+イベント発生（手動ボタン、または各自動検知トリガー）時に、ユーザーを待たせず、かつ動画ファイル破損を 100% 防止するプロ仕様のパイプライン：
+
+1. **警告音鳴動**: `ToneGenerator` によるアラームビープ音の即時再生。
+2. **安全停止**: 現在録画中のリングバッファセグメントを停止・クローズ。
+3. **作業ディレクトリ退避**: 対象セグメントファイル群をアプリ内キャッシュ（`cacheDir/working_segments`）に高速退避。
+4. **即時録画再開**: すかさず新ファイルでリングバッファ常時録画を自動再開（ユーザーの待ち時間・空白をゼロに）。
+5. **非同期結合**: バックグラウンドスレッドで作業ディレクトリのファイルを結合。
+6. **公開保存 ＆ メディアスキャン**: 完了した動画（`event_*.mp4`）を公開ストレージに保存し、`MediaScannerConnection` により OS に即時登録（Google Files 等での一発再生・共有を保証）。
 
 ---
 
-## 5. ディレクトリ構成・保存先仕様
+## 4. ストレージ構造 (パブリック共有ストレージ)
 
-- **動画保存先**: `Android/data/jp.hisanet.charisafe/files/recordings/`
-- **GPSログ保存先**: `Android/data/jp.hisanet.charisafe/files/gpx/`
-- **ログ保存先**: `Android/data/jp.hisanet.charisafe/files/logs/`
+Android 11+ スコープストレージに対応し、PC接続やファイルマネージャーから一目でアクセスできる公開ディレクトリを採用：
+
+- **動画保存先 (イベント動画 & セグメント)**:
+  - `/storage/emulated/0/Movies/ChariSafe/`
+  - `/storage/emulated/0/Movies/ChariSafe/ring_buffer/`
+- **GPXルートログ保存先**:
+  - `/storage/emulated/0/Documents/ChariSafe/gpx/`
+- **バッテリー・温度 CSVログ保存先**:
+  - `/storage/emulated/0/Documents/ChariSafe/logs/`
