@@ -11,7 +11,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.hardware.camera2.CaptureRequest
+import android.media.AudioManager
 import android.media.MediaScannerConnection
+import android.media.ToneGenerator
 import android.os.Binder
 import android.os.IBinder
 import android.os.PowerManager
@@ -40,6 +42,7 @@ import jp.hisanet.charisafe.R
 import jp.hisanet.charisafe.data.camera.RearApproachDetector
 import jp.hisanet.charisafe.data.local.ringbuffer.Mp4Concatenator
 import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
+import jp.hisanet.charisafe.data.sensor.CollisionDropDetector
 import jp.hisanet.charisafe.data.sensor.PocketStorageDetector
 import jp.hisanet.charisafe.domain.model.ActiveCamera
 import jp.hisanet.charisafe.poc.PocMetricsLogger
@@ -93,6 +96,7 @@ class RecordingService : Service(), LifecycleOwner {
     private var activeRecording: Recording? = null
     private var ringBufferManager: RingBufferManager? = null
     private var pocketStorageDetector: PocketStorageDetector? = null
+    private var collisionDropDetector: CollisionDropDetector? = null
 
     private var activeCamera: ActiveCamera = ActiveCamera.REAR
     private var ringBufferMinutes: Int = 5
@@ -106,6 +110,7 @@ class RecordingService : Service(), LifecycleOwner {
     private var metricsJob: Job? = null
 
     private val analysisExecutor = Executors.newSingleThreadExecutor()
+    private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
 
     private val _serviceState = MutableStateFlow(ServiceState())
 
@@ -124,7 +129,7 @@ class RecordingService : Service(), LifecycleOwner {
         ringBufferManager = RingBufferManager(ringBufferMinutes)
         createNotificationChannel()
 
-        // Priority 3: ポケット収納検知の初期化 (省電力スロットリング)
+        // Priority 3: ポケット収納検知
         pocketStorageDetector = PocketStorageDetector(this) { isStored ->
             if (isStored) {
                 Log.w(TAG, "👝 [Priority3] ポケット収納検知: 省電力モードのためFPSを5fpsにスロットリングします")
@@ -133,6 +138,12 @@ class RecordingService : Service(), LifecycleOwner {
                 Log.i(TAG, "☀️ [Priority3] ポケットから取り出されました: 通常FPS ($userConfigFps fps) に復帰します")
                 targetFps = userConfigFps
             }
+        }
+
+        // 衝突・落下検知 (ジャイロ/加速度)
+        collisionDropDetector = CollisionDropDetector(this) {
+            Log.w(TAG, "💥 衝突・落下検知トリガー受領 -> 警告音＋自動イベント保存を実行します")
+            triggerAutoEventWithAlert("衝突・落下検知")
         }
     }
 
@@ -149,17 +160,19 @@ class RecordingService : Service(), LifecycleOwner {
 
         ringBufferManager = RingBufferManager(ringBufferMinutes)
 
-        Log.i(TAG, "onStartCommand action: $action, camera: $activeCamera, targetFps: $targetFps")
+        Log.i(TAG, "onStartCommand action: $action, camera: $activeCamera, ringBufferMinutes: $ringBufferMinutes")
 
         when (action) {
             ACTION_START_RECORDING -> {
                 startForegroundWithNotification()
                 acquireWakeLock()
                 pocketStorageDetector?.startListening()
+                collisionDropDetector?.startListening()
                 startRecordingPipeline()
             }
             ACTION_STOP_RECORDING -> {
                 pocketStorageDetector?.stopListening()
+                collisionDropDetector?.stopListening()
                 stopRecordingPipeline()
                 stopForegroundAndSelf()
             }
@@ -292,10 +305,8 @@ class RecordingService : Service(), LifecycleOwner {
                 .build()
                 .apply {
                     setAnalyzer(analysisExecutor, RearApproachDetector {
-                        Log.w(TAG, "🚨 [Priority2] 接近検知発火 -> 自動イベント保存を実行します")
-                        exportEventAsync(ringBufferMinutes) { file ->
-                            Log.i(TAG, "Auto-saved event video on approach: ${file?.absolutePath}")
-                        }
+                        Log.w(TAG, "🚨 [Priority2] 後方接近検知発火 -> 警告音＋自動イベント保存を実行します")
+                        triggerAutoEventWithAlert("後方接近検知")
                     })
                 }
 
@@ -341,6 +352,29 @@ class RecordingService : Service(), LifecycleOwner {
         }
 
         startMetricsLoggingJob()
+    }
+
+    /**
+     * 【統一された自動検知アクション】
+     * 警告音 (ToneGenerator) を鳴らした上で、非同期作業ディレクトリ退避方式によるイベント保存を実行する。
+     */
+    fun triggerAutoEventWithAlert(reason: String) {
+        // 1. 警告音鳴動 (ビープ音)
+        try {
+            toneGenerator.startTone(ToneGenerator.TONE_DTMF_S, 800)
+            Log.i(TAG, "🔊 警告音鳴動 ($reason)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to play alert tone", e)
+        }
+
+        // 2. イベント保存実行
+        exportEventAsync(ringBufferMinutes) { file ->
+            if (file != null) {
+                Log.i(TAG, "✨ Auto-saved event video for [$reason]: ${file.absolutePath}")
+            } else {
+                Log.e(TAG, "❌ Failed to auto-save event video for [$reason]")
+            }
+        }
     }
 
     fun exportEventAsync(beforeMinutes: Int, onComplete: (File?) -> Unit) {
@@ -461,7 +495,9 @@ class RecordingService : Service(), LifecycleOwner {
 
     override fun onDestroy() {
         pocketStorageDetector?.stopListening()
+        collisionDropDetector?.stopListening()
         analysisExecutor.shutdown()
+        toneGenerator.release()
         stopRecordingPipeline()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
