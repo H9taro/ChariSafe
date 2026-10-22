@@ -39,7 +39,7 @@ class PocMetricsLogger(private val context: Context, private val testName: Strin
 
     private fun initCsvFile() {
         try {
-            val dir = FileUtils.getLogsDir()
+            val dir = FileUtils.getLogsDir(context)
             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             csvFile = File(dir, "metrics_${testName}_$timeStamp.csv")
 

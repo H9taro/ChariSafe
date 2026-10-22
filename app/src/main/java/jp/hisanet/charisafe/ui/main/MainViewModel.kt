@@ -85,12 +85,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun loadExistingEvents() {
         viewModelScope.launch {
             try {
-                val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir()
+                val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir(getApplication())
                 val files = recordingsDir.listFiles { _, name -> name.startsWith("event_") && name.endsWith(".mp4") }
                     ?.sortedByDescending { it.lastModified() }
                     ?: emptyList()
-                
-                // リストに差分がある、または最新化が必要な場合に更新
                 _savedEventFiles.value = files
                 Log.i(TAG, "Loaded ${files.size} event videos from storage")
             } catch (e: Exception) {
@@ -116,7 +114,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val eventFile = saveManualEventUseCase.execute()
             if (eventFile != null) {
                 Log.i(TAG, "Event successfully saved to: ${eventFile.absolutePath}")
-                loadExistingEvents() // 即座に最新リストを再スキャンして反映
+                loadExistingEvents()
                 _selectedEventFile.value = eventFile
             } else {
                 Log.e(TAG, "Event export returned null file")

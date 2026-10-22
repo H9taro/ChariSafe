@@ -47,6 +47,7 @@ import jp.hisanet.charisafe.data.sensor.CollisionDropDetector
 import jp.hisanet.charisafe.data.sensor.PocketStorageDetector
 import jp.hisanet.charisafe.domain.model.ActiveCamera
 import jp.hisanet.charisafe.poc.PocMetricsLogger
+import jp.hisanet.charisafe.util.FileUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -128,7 +129,7 @@ class RecordingService : Service(), LifecycleOwner {
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
 
-        ringBufferManager = RingBufferManager(ringBufferMinutes)
+        ringBufferManager = RingBufferManager(this, ringBufferMinutes)
         createNotificationChannel()
 
         pocketStorageDetector = PocketStorageDetector(this) { isStored ->
@@ -163,7 +164,7 @@ class RecordingService : Service(), LifecycleOwner {
         resHeight = intent?.getIntExtra(EXTRA_RESOLUTION_HEIGHT, 720) ?: 720
         audioEnabled = intent?.getBooleanExtra(EXTRA_AUDIO_ENABLED, true) ?: true
 
-        ringBufferManager = RingBufferManager(ringBufferMinutes)
+        ringBufferManager = RingBufferManager(this, ringBufferMinutes)
 
         Log.i(TAG, "onStartCommand action: $action, camera: $activeCamera, ringBufferMinutes: $ringBufferMinutes")
 
@@ -210,9 +211,9 @@ class RecordingService : Service(), LifecycleOwner {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val audioLabel = if (audioEnabled) "音声+映像" else "映像のみ"
+        val camLabel = if (activeCamera == ActiveCamera.REAR) "後方(リア)" else "前方(フロント)"
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("ChariSafe 録画稼働中 ($audioLabel)")
+            .setContentTitle("ChariSafe 録画稼働中 ($camLabel)")
             .setContentText("${resHeight}p / ${targetFps}fps 安全録画中")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
@@ -417,7 +418,7 @@ class RecordingService : Service(), LifecycleOwner {
                 setupVideoCaptureAndStart()
             }
 
-            val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir()
+            val recordingsDir = FileUtils.getRecordingsDir(this@RecordingService)
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val eventFile = File(recordingsDir, "event_${timestamp}.mp4")
 
