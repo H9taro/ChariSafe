@@ -13,10 +13,10 @@ class RearApproachDetector(
 
     companion object {
         private const val TAG = "RearApproachDetector"
-        private const val DARK_LUMINOSITY_THRESHOLD = 50.0 // 夜間判定用平均輝度上限
-        private const val HIGH_BRIGHTNESS_PIXEL_THRESHOLD = 220 // ヘッドライトの明るさ閾値
-        private const val HIGH_BRIGHTNESS_RATIO_TRIGGER = 0.05f // 画面の5%以上が高輝度
-        private const val AREA_EXPANSION_RATIO = 1.5f // 前回比1.5倍以上の急拡大
+        private const val DARK_LUMINOSITY_THRESHOLD = 80.0 // テストしやすように暗所判定の閾値を少し緩和
+        private const val HIGH_BRIGHTNESS_PIXEL_THRESHOLD = 200 // 明るさの閾値
+        private const val HIGH_BRIGHTNESS_RATIO_TRIGGER = 0.03f // 3%以上が高輝度
+        private const val AREA_EXPANSION_RATIO = 1.3f // 1.3倍以上の急拡大
     }
 
     private var previousHighBrightnessRatio = 0f
@@ -34,13 +34,9 @@ class RearApproachDetector(
         try {
             val buffer = mediaImage.planes[0].buffer
             val data = buffer.toByteArray()
-            val width = mediaImage.width
-            val height = mediaImage.height
-
-            // 1. 平均輝度の計算 (ダウンサンプルして高速化)
+            val step = 4
             var totalLuminosity = 0L
             var highBrightnessPixelCount = 0
-            val step = 4 // 間引きサンプリング
             var sampledCount = 0
 
             for (i in 0 until data.size step step) {
@@ -56,28 +52,26 @@ class RearApproachDetector(
             val avgLuminosity = if (sampledCount > 0) totalLuminosity.toDouble() / sampledCount else 0.0
             val highBrightnessRatio = highBrightnessPixelCount.toFloat() / sampledCount
 
-            // 2. 夜間判定かつ高輝度領域の急拡大判定
             val now = System.currentTimeMillis()
-            if (avgLuminosity <= DARK_LUMINOSITY_THRESHOLD) {
-                if (highBrightnessRatio >= HIGH_BRIGHTNESS_RATIO_TRIGGER) {
-                    if (previousHighBrightnessRatio > 0f && highBrightnessRatio >= previousHighBrightnessRatio * AREA_EXPANSION_RATIO) {
-                        if (now - lastAlertTimestamp > 5000L) { // 5秒間隔のクールダウン
-                            Log.w(TAG, "🚨 夜間後方車両接近検知! AvgLum: $avgLuminosity, Ratio: $highBrightnessRatio (Prev: $previousHighBrightnessRatio)")
-                            lastAlertTimestamp = now
-                            
-                            // 警告音再生
-                            toneGenerator.startTone(ToneGenerator.TONE_DTMF_S, 500)
-                            
-                            // 自動イベント保存発火
-                            onApproachDetected()
-                        }
+            // 簡易テストのため、夜間判定（暗所）または急激な高輝度領域の出現・拡大を検知
+            if (highBrightnessRatio >= HIGH_BRIGHTNESS_RATIO_TRIGGER) {
+                if (previousHighBrightnessRatio > 0f && highBrightnessRatio >= previousHighBrightnessRatio * AREA_EXPANSION_RATIO) {
+                    if (now - lastAlertTimestamp > 10000L) { // 10秒間隔のクールダウン
+                        Log.w(TAG, "🚨 後方車両接近検知! AvgLum: $avgLuminosity, Ratio: $highBrightnessRatio (Prev: $previousHighBrightnessRatio)")
+                        lastAlertTimestamp = now
+                        
+                        // 1. 警告音再生
+                        toneGenerator.startTone(ToneGenerator.TONE_DTMF_S, 600)
+                        
+                        // 2. 自動イベント保存発火
+                        onApproachDetected()
                     }
                 }
             }
             previousHighBrightnessRatio = highBrightnessRatio
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error analyzing image frame for rear approach", e)
+            Log.e(TAG, "Error analyzing image frame for approach", e)
         } finally {
             imageProxy.close()
         }
