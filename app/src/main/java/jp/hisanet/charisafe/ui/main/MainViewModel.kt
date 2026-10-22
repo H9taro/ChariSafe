@@ -76,14 +76,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         loadExistingEvents()
-        // Priority1: 急減速検知時の自動イベント保存リスナー設定
         (gpxRepository as? GpxRepositoryImpl)?.onDecelerationDetected = {
             Log.w(TAG, "🚨 [Priority1] 急減速検知トリガー受領: 自動イベント保存を開始します")
             triggerManualEvent()
         }
     }
 
-    private fun loadExistingEvents() {
+    fun loadExistingEvents() {
         viewModelScope.launch {
             try {
                 val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir()
@@ -115,11 +114,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val eventFile = saveManualEventUseCase.execute()
             if (eventFile != null) {
                 Log.i(TAG, "Event successfully saved to: ${eventFile.absolutePath}")
-                val currentList = _savedEventFiles.value.toMutableList()
-                if (!currentList.contains(eventFile)) {
-                    currentList.add(0, eventFile)
-                    _savedEventFiles.value = currentList
-                }
+                loadExistingEvents() // リストを最新化
                 _selectedEventFile.value = eventFile
             } else {
                 Log.e(TAG, "Event export returned null file")

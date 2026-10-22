@@ -72,6 +72,7 @@ fun MainScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 hasCameraAudioPermissions = checkCameraAudioPermissions(context)
                 hasLocationPermission = checkLocationPermission(context)
+                viewModel.loadExistingEvents() // 画面復帰時に保存済みイベントファイル一覧を自動再スキャン
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
