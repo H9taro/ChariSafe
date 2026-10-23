@@ -35,7 +35,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -134,25 +133,6 @@ fun MainScreen(
         }
     }
 
-    val shareCurrentLocation = {
-        val lat = 35.681236
-        val lon = 139.767125
-        val mapsUrl = "https://maps.google.com/?q=$lat,$lon"
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, "「現在ChariSafeでサイクリング中です！」\n現在地: $mapsUrl (速度: ${uiState.status.currentSpeedKmh}km/h)")
-        }
-        context.startActivity(Intent.createChooser(intent, "現在地をGoogle Mapsで共有"))
-    }
-
-    var previousListSize by remember { mutableIntStateOf(uiState.savedEventFiles.size) }
-    LaunchedEffect(uiState.savedEventFiles.size) {
-        if (uiState.savedEventFiles.size > previousListSize) {
-            Toast.makeText(context, "✨ イベント動画を保存しました！", Toast.LENGTH_LONG).show()
-        }
-        previousListSize = uiState.savedEventFiles.size
-    }
-
     LaunchedEffect(Unit) {
         while (true) {
             delay(3000L.milliseconds)
@@ -220,7 +200,7 @@ fun MainScreen(
                 modifier = Modifier.fillMaxWidth().padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(text = "速度", fontSize = 14.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(text = "現在速度", fontSize = 14.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 Text(
                     text = String.format(Locale.US, "%.1f", uiState.status.currentSpeedKmh),
                     fontSize = 52.sp,
@@ -281,9 +261,50 @@ fun MainScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // 4. 構造化イベント件数サマリーカード
+        // 4. 【厳格配置】イベント感度調整とイベント件数サマリの間に配置された 録画スタート / 録画ストップ ボタン
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            val isRecording = uiState.status.state == RecordingState.RECORDING
+            val isExporting = uiState.status.state == RecordingState.EXPORTING
+
+            if (!isRecording && !isExporting) {
+                Button(
+                    onClick = {
+                        hasCameraAudioPermissions = checkCameraAudioPermissions(context)
+                        if (hasCameraAudioPermissions) viewModel.startRecording() else openAppSettings()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.fillMaxWidth().height(56.dp)
+                ) {
+                    Text("録画スタート", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+            } else if (isExporting) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth().height(56.dp)
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
+                    Text("イベント動画を即時保存中...", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Button(
+                    onClick = { viewModel.stopRecording() },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.fillMaxWidth().height(56.dp)
+                ) {
+                    Text("録画ストップ (サマリー生成)", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 5. 構造化イベント件数サマリーカード
         Card(
             modifier = Modifier.fillMaxWidth().clickable { isHistoryExpanded = !isHistoryExpanded },
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
@@ -304,18 +325,7 @@ fun MainScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // 5. 現在地共有ボタン
-        Button(
-            onClick = { shareCurrentLocation() },
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
-            modifier = Modifier.fillMaxWidth().height(48.dp)
-        ) {
-            Text("📍 現在地をGoogle Mapsで共有する", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
         // ==========================================
         // 【折りたたみエリア (Accordion)】
@@ -391,7 +401,6 @@ fun MainScreen(
         }
 
         val isRecording = uiState.status.state == RecordingState.RECORDING
-        val isExporting = uiState.status.state == RecordingState.EXPORTING
 
         AccordionSection(title = "⚙️ 録画設定 (停止中のみ変更可)", expanded = isSettingsExpanded, onToggle = { isSettingsExpanded = !isSettingsExpanded }) {
             Column(modifier = Modifier.padding(8.dp)) {
@@ -435,44 +444,6 @@ fun MainScreen(
                     enabled = !isRecording,
                     onSelected = { viewModel.updateFps(it) }
                 )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // 録画スタート / ストップ ボタン
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            if (!isRecording && !isExporting) {
-                Button(
-                    onClick = {
-                        hasCameraAudioPermissions = checkCameraAudioPermissions(context)
-                        if (hasCameraAudioPermissions) viewModel.startRecording() else openAppSettings()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    modifier = Modifier.fillMaxWidth().height(56.dp)
-                ) {
-                    Text("録画スタート", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                }
-            } else if (isExporting) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                    modifier = Modifier.fillMaxWidth().height(56.dp)
-                ) {
-                    CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
-                    Text("イベント動画を即時保存中...", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                }
-            } else {
-                Button(
-                    onClick = { viewModel.stopRecording() },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                    modifier = Modifier.fillMaxWidth().height(56.dp)
-                ) {
-                    Text("録画ストップ (サマリー生成)", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                }
             }
         }
     }
