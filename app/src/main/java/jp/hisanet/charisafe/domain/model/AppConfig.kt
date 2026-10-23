@@ -11,5 +11,10 @@ data class AppConfig(
     val gpsIntervalSeconds: Long = 30L,
     val ringBufferMinutes: Int = 5,
     val resolution: VideoResolution = VideoResolution.HD_720P,
-    val audioEnabled: Boolean = true // デフォルトで音声付き録画
+    val audioEnabled: Boolean = true,
+    // クールダウン設定秒数
+    val decelerationCooldownSec: Long = 30L,
+    val approachCooldownSec: Long = 60L,
+    val collisionCooldownSec: Long = 0L,
+    val soundCooldownSec: Long = 30L
 )
