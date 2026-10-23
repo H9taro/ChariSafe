@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,6 +28,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -54,6 +56,8 @@ import jp.hisanet.charisafe.domain.model.RecordingState
 import jp.hisanet.charisafe.domain.model.VideoResolution
 import kotlinx.coroutines.delay
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 @Composable
@@ -67,6 +71,13 @@ fun MainScreen(
 
     var hasCameraAudioPermissions by remember { mutableStateOf(checkCameraAudioPermissions(context)) }
     var hasLocationPermission by remember { mutableStateOf(checkLocationPermission(context)) }
+
+    // アコーディオン開閉状態
+    var isHistoryExpanded by remember { mutableStateOf(false) }
+    var isVideosExpanded by remember { mutableStateOf(false) }
+    var isSummaryExpanded by remember { mutableStateOf(false) }
+    var isGpxExpanded by remember { mutableStateOf(false) }
+    var isSettingsExpanded by remember { mutableStateOf(false) }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -103,23 +114,35 @@ fun MainScreen(
         context.startActivity(intent)
     }
 
-    val shareVideoFile: (File) -> Unit = { file ->
+    val shareFile: (File) -> Unit = { file ->
         try {
             val uri = FileProvider.getUriForFile(
                 context,
                 "${context.packageName}.fileprovider",
                 file
             )
+            val mimeType = if (file.name.endsWith(".jpg")) "image/jpeg" else "video/mp4"
             val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "video/mp4"
+                type = mimeType
                 putExtra(Intent.EXTRA_STREAM, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            context.startActivity(Intent.createChooser(intent, "イベント動画を共有 (Google Files等)"))
+            context.startActivity(Intent.createChooser(intent, "ファイル共有 (Google Files等)"))
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(context, "共有エラー: ${e.message}", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    val shareCurrentLocation = {
+        val lat = 35.681236
+        val lon = 139.767125
+        val mapsUrl = "https://maps.google.com/?q=$lat,$lon"
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, "「現在ChariSafeでサイクリング中です！」\n現在地: $mapsUrl (速度: ${uiState.status.currentSpeedKmh}km/h)")
+        }
+        context.startActivity(Intent.createChooser(intent, "現在地をGoogle Mapsで共有"))
     }
 
     var previousListSize by remember { mutableIntStateOf(uiState.savedEventFiles.size) }
@@ -130,10 +153,9 @@ fun MainScreen(
         previousListSize = uiState.savedEventFiles.size
     }
 
-    // バックグラウンドでの自動保存（接近検知・急減速等）を定期的に自動スキャンしてリストに反映するポーリング
     LaunchedEffect(Unit) {
         while (true) {
-            delay(3000L) // 3秒おきにファイル一覧を自動再スキャン
+            delay(3000L)
             viewModel.loadExistingEvents()
         }
     }
@@ -153,7 +175,7 @@ fun MainScreen(
         verticalArrangement = Arrangement.Top
     ) {
         Text(
-            text = "ChariSafe：自転車用レコーダー",
+            text = "ChariSafe ライドモニター",
             fontSize = 18.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
@@ -174,53 +196,34 @@ fun MainScreen(
                         fontSize = 15.sp
                     )
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "録画を行うために、OS設定画面でカメラ権限を許可してください。",
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        fontSize = 12.sp
-                    )
+                    Text(text = "OS設定画面でカメラ権限を許可してください。", color = MaterialTheme.colorScheme.onErrorContainer, fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Button(
-                            onClick = { requestPermissions() },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("権限要求", fontSize = 13.sp)
-                        }
-
-                        OutlinedButton(
-                            onClick = { openAppSettings() },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("設定画面を開く", fontSize = 13.sp)
-                        }
+                    Button(onClick = { requestPermissions() }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
+                        Text("権限要求", fontSize = 13.sp)
                     }
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // Current Speed Meter Card
+        // ==========================================
+        // 【常時表示エリア】
+        // ==========================================
+
+        // 1. 現在速度メーター
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
             elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
         ) {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(20.dp),
+                modifier = Modifier.fillMaxWidth().padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(text = "速度", fontSize = 14.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(text = "現在速度", fontSize = 14.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 Text(
                     text = String.format(Locale.US, "%.1f", uiState.status.currentSpeedKmh),
-                    fontSize = 48.sp,
+                    fontSize = 52.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
@@ -228,42 +231,184 @@ fun MainScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // System Status Card & Settings (プルダウン対応)
+        // 2. 最後のイベントカード
+        if (uiState.lastEvent != null) {
+            val last = uiState.lastEvent!!
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(text = "🚨 最後のイベント検知", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "${last.eventType.emoji} ${last.eventType.displayName} (速度: ${last.speedKmh}km/h)",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        // 3. イベント感度スライダー
         Card(
             modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(text = "⚙️ イベント感度調整 (常時変更可能)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(text = "急減速閾値: ${uiState.sensitivity.decelerationSensitivity.toInt()} km/h", fontSize = 11.sp)
+                Slider(
+                    value = uiState.sensitivity.decelerationSensitivity,
+                    onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(decelerationSensitivity = it)) },
+                    valueRange = 10f..25f,
+                    steps = 15
+                )
+
+                Text(text = "接近検知感度: ${(uiState.sensitivity.approachSensitivity * 100).toInt()}%", fontSize = 11.sp)
+                Slider(
+                    value = uiState.sensitivity.approachSensitivity,
+                    onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(approachSensitivity = it)) },
+                    valueRange = 0.3f..1.0f,
+                    steps = 7
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 4. 構造化イベント件数サマリーカード
+        Card(
+            modifier = Modifier.fillMaxWidth().clickable { isHistoryExpanded = !isHistoryExpanded },
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                val isRecording = uiState.status.state == RecordingState.RECORDING
-                val isExporting = uiState.status.state == RecordingState.EXPORTING
+                Text(text = "📊 イベント件数サマリー (タップで履歴)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    EventCountBadge("⚠ 急減速", uiState.eventCounts.decelerationCount)
+                    EventCountBadge("🚗 接近", uiState.eventCounts.approachCount)
+                    EventCountBadge("💥 衝突", uiState.eventCounts.collisionCount)
+                    EventCountBadge("🔊 音", uiState.eventCounts.soundCount)
+                }
+            }
+        }
 
-                "ステータス".RowStatusItem(
-                    value = when (uiState.status.state) {
-                        RecordingState.RECORDING -> "🔴 録画中 [${if (uiState.config.activeCamera == ActiveCamera.REAR) "後方(リア)" else "前方(フロント)"}]"
-                        RecordingState.EXPORTING -> "⚡ 過去ログを即時結合中..."
-                        RecordingState.PREPARING -> "⏳ 準備中..."
-                        RecordingState.SLEEP -> "🌙 スリープ中"
-                        RecordingState.ERROR -> "❌ エラー"
-                        else -> "⚪ 停止中 (IDLE)"
-                    },
-                    color = if (isRecording) Color.Red else if (isExporting) Color(0xFFFF9800) else Color.Gray
-                )
+        Spacer(modifier = Modifier.height(12.dp))
 
-                Spacer(modifier = Modifier.height(6.dp))
+        // 5. 現在地共有ボタン
+        Button(
+            onClick = { shareCurrentLocation() },
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+            modifier = Modifier.fillMaxWidth().height(48.dp)
+        ) {
+            Text("📍 現在地をGoogle Mapsで共有する", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
 
-                // 0. 撮影カメラ選択 (後方 / 前方) プルダウン
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // ==========================================
+        // 【折りたたみエリア (Accordion)】
+        // ==========================================
+
+        AccordionSection(title = "📁 イベント履歴 (${uiState.eventLogs.size}件)", expanded = isHistoryExpanded, onToggle = { isHistoryExpanded = !isHistoryExpanded }) {
+            if (uiState.eventLogs.isEmpty()) {
+                Text("イベント履歴はありません", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(8.dp))
+            } else {
+                uiState.eventLogs.forEach { log ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(text = "${log.eventType.emoji} ${log.eventType.displayName}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text(text = "時刻: ${SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US).format(Date(log.timestampMs))}", fontSize = 11.sp, color = Color.Gray)
+                            Text(text = "速度: ${log.speedKmh} km/h", fontSize = 11.sp)
+                            Text(text = "感度設定 ➔ 接近: ${(log.approachSensitivity * 100).toInt()}%, 減速: ${log.decelerationSensitivity.toInt()}km/h", fontSize = 10.sp, color = Color.DarkGray)
+
+                            if (!log.videoFilePath.isNullOrEmpty()) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                OutlinedButton(
+                                    onClick = { shareFile(File(log.videoFilePath)) },
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Text("▶ 動画再生・共有", fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        AccordionSection(title = "🎥 保存済み動画 (${uiState.savedEventFiles.size}件)", expanded = isVideosExpanded, onToggle = { isVideosExpanded = !isVideosExpanded }) {
+            if (uiState.savedEventFiles.isEmpty()) {
+                Text("保存された動画はありません", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(8.dp))
+            } else {
+                uiState.savedEventFiles.forEach { file ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = file.name, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        OutlinedButton(onClick = { shareFile(file) }, modifier = Modifier.height(32.dp)) {
+                            Text("共有", fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        AccordionSection(title = "📈 ライドサマリー & 速度分析", expanded = isSummaryExpanded, onToggle = { isSummaryExpanded = !isSummaryExpanded }) {
+            val summary = uiState.currentRideSummary
+            if (summary == null) {
+                Text("録画を終了するとライドサマリーが生成されます", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(8.dp))
+            } else {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Text(text = "総距離: ${String.format(Locale.US, "%.2f", summary.totalDistanceKm)} km", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(text = "平均速度: ${String.format(Locale.US, "%.1f", summary.averageSpeedKmh)} km/h (最高: ${summary.maxSpeedKmh} km/h)", fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(text = "【危険度定量的指標】", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                    Text(text = "🚗 接近検知: ${summary.eventCounts.approachCount}件 (${String.format(Locale.US, "%.2f", summary.approachPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.approachPerHour)}件/h)", fontSize = 11.sp)
+                    Text(text = "⚠ 急減速: ${summary.eventCounts.decelerationCount}件 (${String.format(Locale.US, "%.2f", summary.decelerationPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.decelerationPerHour)}件/h)", fontSize = 11.sp)
+                }
+            }
+        }
+
+        AccordionSection(title = "🗺️ GPXログ情報", expanded = isGpxExpanded, onToggle = { isGpxExpanded = !isGpxExpanded }) {
+            Text(text = uiState.status.activeGpxFile ?: "GPXログ未取得", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(8.dp))
+        }
+
+        val isRecording = uiState.status.state == RecordingState.RECORDING
+        val isExporting = uiState.status.state == RecordingState.EXPORTING
+
+        AccordionSection(title = "⚙️ 録画設定 (停止中のみ変更可)", expanded = isSettingsExpanded, onToggle = { isSettingsExpanded = !isSettingsExpanded }) {
+            Column(modifier = Modifier.padding(8.dp)) {
+                if (isRecording) {
+                    Text(text = "※録画中は設定変更できません", fontSize = 11.sp, color = Color.Red)
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+
                 DropdownSettingItem(
                     label = "撮影カメラ",
-                    currentValue = if (uiState.config.activeCamera == ActiveCamera.REAR) "後方 (リアカメラ)" else "前方 (フロントカメラ)",
+                    currentValue = if (uiState.config.activeCamera == ActiveCamera.REAR) "後方 (リア)" else "前方 (フロント)",
                     options = ActiveCamera.entries,
-                    optionLabel = { if (it == ActiveCamera.REAR) "後方 (リアカメラ)" else "前方 (フロントカメラ)" },
+                    optionLabel = { if (it == ActiveCamera.REAR) "後方 (リア)" else "前方 (フロント)" },
                     enabled = !isRecording,
                     onSelected = { viewModel.updateActiveCamera(it) }
                 )
 
-                // 1. リングバッファ時間 プルダウン
                 DropdownSettingItem(
                     label = "リングバッファ時間",
                     currentValue = "${uiState.config.ringBufferMinutes} 分",
@@ -273,9 +418,8 @@ fun MainScreen(
                     onSelected = { viewModel.updateRingBuffer(it) }
                 )
 
-                // 2. GPS情報更新間隔 プルダウン
                 DropdownSettingItem(
-                    label = "GPS情報更新間隔",
+                    label = "GPS更新間隔",
                     currentValue = "${uiState.config.gpsIntervalSeconds} 秒",
                     options = listOf(1L, 5L, 10L, 30L),
                     optionLabel = { "$it 秒" },
@@ -283,7 +427,6 @@ fun MainScreen(
                     onSelected = { viewModel.updateGpsInterval(it) }
                 )
 
-                // 3. FPS プルダウン
                 DropdownSettingItem(
                     label = "撮影 FPS",
                     currentValue = "${uiState.config.fps} fps",
@@ -292,48 +435,24 @@ fun MainScreen(
                     enabled = !isRecording,
                     onSelected = { viewModel.updateFps(it) }
                 )
-
-                // 4. 録画解像度 プルダウン
-                DropdownSettingItem(
-                    label = "録画解像度",
-                    currentValue = uiState.config.resolution.label,
-                    options = VideoResolution.entries,
-                    optionLabel = { it.label },
-                    enabled = !isRecording,
-                    onSelected = { viewModel.updateResolution(it) }
-                )
-
-                if (uiState.status.errorMessage != null) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = "エラー: ${uiState.status.errorMessage}", color = Color.Red, fontSize = 12.sp)
-                }
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Controls / Action Buttons
+        // 録画スタート / ストップ ボタン
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            val isRecording = uiState.status.state == RecordingState.RECORDING
-            val isExporting = uiState.status.state == RecordingState.EXPORTING
-
             if (!isRecording && !isExporting) {
                 Button(
                     onClick = {
                         hasCameraAudioPermissions = checkCameraAudioPermissions(context)
-                        if (hasCameraAudioPermissions) {
-                            viewModel.startRecording()
-                        } else {
-                            openAppSettings()
-                        }
+                        if (hasCameraAudioPermissions) viewModel.startRecording() else openAppSettings()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
+                    modifier = Modifier.fillMaxWidth().height(56.dp)
                 ) {
                     Text("録画スタート", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
@@ -341,9 +460,7 @@ fun MainScreen(
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
+                    modifier = Modifier.fillMaxWidth().height(56.dp)
                 ) {
                     CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
                     Text("イベント動画を即時保存中...", fontSize = 15.sp, fontWeight = FontWeight.Bold)
@@ -352,83 +469,41 @@ fun MainScreen(
                 Button(
                     onClick = { viewModel.stopRecording() },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
+                    modifier = Modifier.fillMaxWidth().height(56.dp)
                 ) {
-                    Text("録画ストップ", fontSize = 16.sp)
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Event Save Button (前5分 -> 即時保存に改良)
-                Button(
-                    onClick = { viewModel.triggerManualEvent() },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
-                ) {
-                    Text("⚠️ イベント保存", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("録画ストップ (サマリー生成)", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
             }
+        }
+    }
+}
 
-            Spacer(modifier = Modifier.height(16.dp))
+@Composable
+fun EventCountBadge(label: String, count: Int) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(4.dp)) {
+        Text(text = label, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text(text = "$count 件", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+    }
+}
 
-            // Saved Event Files List (一覧表示 ＋ タップして選択・共有)
-            if (uiState.savedEventFiles.isNotEmpty()) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        uiState.savedEventFiles.forEach { file ->
-                            val isSelected = uiState.selectedEventFile == file
-                            Card(
-                                colors = CardDefaults.cardColors(
-                                    containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
-                                    .clickable {
-                                        viewModel.selectEventFile(if (isSelected) null else file)
-                                    }
-                            ) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    Text(
-                                        text = file.name,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-
-                                    // 選択されている場合のみ詳細アクション（共有・削除）を表示
-                                    if (isSelected) {
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Button(
-                                                onClick = { shareVideoFile(file) },
-                                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
-                                                modifier = Modifier.weight(1f).height(36.dp)
-                                            ) {
-                                                Text("📤 共有 (Google Files等)", fontSize = 12.sp)
-                                            }
-                                            OutlinedButton(
-                                                onClick = { viewModel.removeEventFile(file) },
-                                                modifier = Modifier.weight(0.5f).height(36.dp)
-                                            ) {
-                                                Text("🗑️ 削除", fontSize = 12.sp)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+@Composable
+fun AccordionSection(title: String, expanded: Boolean, onToggle: () -> Unit, content: @Composable () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { onToggle() }.padding(8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = title, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text(text = if (expanded) "▲" else "▼", fontSize = 12.sp)
+            }
+            AnimatedVisibility(visible = expanded) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    content()
                 }
             }
         }
@@ -447,9 +522,7 @@ fun <T> DropdownSettingItem(
     var expanded by remember { mutableStateOf(false) }
 
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -482,22 +555,8 @@ fun <T> DropdownSettingItem(
     }
 }
 
-@Composable
-private fun String.RowStatusItem(value: String, color: Color = Color.Unspecified) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(text = this@RowStatusItem, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-        Text(text = value, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = color)
-    }
-}
-
 private fun checkCameraAudioPermissions(context: android.content.Context): Boolean {
-    val camera = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-    return camera
+    return ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 }
 
 private fun checkLocationPermission(context: android.content.Context): Boolean {

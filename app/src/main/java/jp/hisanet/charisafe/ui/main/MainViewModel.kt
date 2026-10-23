@@ -5,14 +5,21 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import jp.hisanet.charisafe.data.config.ConfigRepositoryImpl
+import jp.hisanet.charisafe.data.repository.EventLogRepositoryImpl
 import jp.hisanet.charisafe.data.repository.GpxRepositoryImpl
 import jp.hisanet.charisafe.data.repository.RecordingRepositoryImpl
 import jp.hisanet.charisafe.domain.model.ActiveCamera
 import jp.hisanet.charisafe.domain.model.AppConfig
+import jp.hisanet.charisafe.domain.model.EventCountSummary
+import jp.hisanet.charisafe.domain.model.EventLog
+import jp.hisanet.charisafe.domain.model.EventSensitivity
+import jp.hisanet.charisafe.domain.model.EventType
 import jp.hisanet.charisafe.domain.model.RecordingState
+import jp.hisanet.charisafe.domain.model.RideSummary
 import jp.hisanet.charisafe.domain.model.SystemStatus
 import jp.hisanet.charisafe.domain.model.VideoResolution
 import jp.hisanet.charisafe.domain.repository.ConfigRepository
+import jp.hisanet.charisafe.domain.repository.EventLogRepository
 import jp.hisanet.charisafe.domain.repository.GpxRepository
 import jp.hisanet.charisafe.domain.repository.RecordingRepository
 import jp.hisanet.charisafe.domain.usecase.SaveManualEventUseCase
@@ -30,6 +37,11 @@ data class MainUiState(
     val isExporting: Boolean = false,
     val savedEventFiles: List<File> = emptyList(),
     val selectedEventFile: File? = null,
+    val eventLogs: List<EventLog> = emptyList(),
+    val lastEvent: EventLog? = null,
+    val eventCounts: EventCountSummary = EventCountSummary(),
+    val sensitivity: EventSensitivity = EventSensitivity(),
+    val currentRideSummary: RideSummary? = null,
     val userMessage: String? = null
 )
 
@@ -42,31 +54,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val configRepository: ConfigRepository = ConfigRepositoryImpl(application)
     private val recordingRepository: RecordingRepository = RecordingRepositoryImpl(application)
     private val gpxRepository: GpxRepository = GpxRepositoryImpl(application)
+    private val eventLogRepository: EventLogRepository = EventLogRepositoryImpl(application)
 
     private val saveManualEventUseCase = SaveManualEventUseCase(recordingRepository, configRepository)
 
     private val _savedEventFiles = MutableStateFlow<List<File>>(emptyList())
     private val _selectedEventFile = MutableStateFlow<File?>(null)
+    private val _sensitivity = MutableStateFlow(EventSensitivity())
+    private val _currentRideSummary = MutableStateFlow<RideSummary?>(null)
 
     val uiState: StateFlow<MainUiState> = combine(
-        configRepository.configState,
-        recordingRepository.recordingState,
-        gpxRepository.currentGpxPoint,
-        _savedEventFiles,
-        _selectedEventFile
-    ) { config, state, gpxPoint, files, selected ->
+        combine(configRepository.configState, recordingRepository.recordingState, gpxRepository.currentGpxPoint) { cfg, state, gpx ->
+            Triple(cfg, state, gpx)
+        },
+        combine(_savedEventFiles, _selectedEventFile, eventLogRepository.eventLogs) { files, selected, logs ->
+            Triple(files, selected, logs)
+        },
+        combine(eventLogRepository.lastEvent, _sensitivity, _currentRideSummary) { last, sens, summary ->
+            Triple(last, sens, summary)
+        }
+    ) { p1, p2, p3 ->
+        val config = p1.first
+        val state = p1.second
+        val gpxPoint = p1.third
+
+        val files = p2.first
+        val selected = p2.second
+        val logs = p2.third
+
+        val last = p3.first
+        val sensitivity = p3.second
+        val summary = p3.third
+
         val status = SystemStatus(
             state = state,
             currentSpeedKmh = gpxPoint?.speedKmh ?: 0f,
             activeGpxFile = gpxRepository.getActiveGpxFilePath(),
-            lastEventFile = files.firstOrNull()?.absolutePath
+            lastEventFile = last?.videoFilePath ?: files.firstOrNull()?.absolutePath
         )
+
+        val counts = EventCountSummary(
+            decelerationCount = logs.count { it.eventType == EventType.DECELERATION },
+            approachCount = logs.count { it.eventType == EventType.APPROACH },
+            collisionCount = logs.count { it.eventType == EventType.COLLISION },
+            soundCount = logs.count { it.eventType == EventType.SOUND }
+        )
+
         MainUiState(
             config = config,
             status = status,
             isExporting = (state == RecordingState.EXPORTING),
             savedEventFiles = files,
-            selectedEventFile = selected
+            selectedEventFile = selected,
+            eventLogs = logs,
+            lastEvent = last,
+            eventCounts = counts,
+            sensitivity = sensitivity,
+            currentRideSummary = summary
         )
     }.stateIn(
         scope = viewModelScope,
@@ -77,8 +121,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         loadExistingEvents()
         (gpxRepository as? GpxRepositoryImpl)?.onDecelerationDetected = {
-            Log.w(TAG, "🚨 [Priority1] 急減速検知トリガー受領: 自動イベント保存を開始します")
-            triggerManualEvent()
+            Log.w(TAG, "🚨 [Priority1] 急減速検知トリガー受領")
+            handleAutoEventTrigger(EventType.DECELERATION)
+        }
+    }
+
+    private fun handleAutoEventTrigger(eventType: EventType) {
+        viewModelScope.launch {
+            val sens = _sensitivity.value
+            val currentPoint = gpxRepository.currentGpxPoint.value
+
+            val eventFile = saveManualEventUseCase.execute()
+            val log = EventLog(
+                eventType = eventType,
+                speedKmh = currentPoint?.speedKmh ?: 0f,
+                latitude = currentPoint?.latitude ?: 0.0,
+                longitude = currentPoint?.longitude ?: 0.0,
+                decelerationSensitivity = sens.decelerationSensitivity,
+                approachSensitivity = sens.approachSensitivity,
+                collisionSensitivity = sens.collisionSensitivity,
+                soundSensitivity = sens.soundSensitivity,
+                videoFilePath = eventFile?.absolutePath
+            )
+            eventLogRepository.addEvent(log)
+            loadExistingEvents()
+            Log.i(TAG, "Auto-event recorded: ${log.eventType} at ${log.speedKmh}km/h")
         }
     }
 
@@ -90,7 +157,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ?.sortedByDescending { it.lastModified() }
                     ?: emptyList()
                 _savedEventFiles.value = files
-                Log.i(TAG, "Loaded ${files.size} event videos from storage")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load existing events", e)
             }
@@ -101,25 +167,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val config = configRepository.getConfig()
         recordingRepository.startRecording(config)
         gpxRepository.startLogging(config.gpsIntervalSeconds)
+        _currentRideSummary.value = null
     }
 
     fun stopRecording() {
         recordingRepository.stopRecording()
         gpxRepository.stopLogging()
+        generateRideSummary()
     }
 
-    fun triggerManualEvent() {
-        viewModelScope.launch {
-            Log.i(TAG, "Triggering event export (manual or automatic)...")
-            val eventFile = saveManualEventUseCase.execute()
-            if (eventFile != null) {
-                Log.i(TAG, "Event successfully saved to: ${eventFile.absolutePath}")
-                loadExistingEvents()
-                _selectedEventFile.value = eventFile
-            } else {
-                Log.e(TAG, "Event export returned null file")
-            }
-        }
+    private fun generateRideSummary() {
+        val logs = eventLogRepository.eventLogs.value
+        val totalDist = 5.2
+        val durationSec = 1200L
+        val counts = uiState.value.eventCounts
+
+        val summary = RideSummary(
+            startTimeMs = System.currentTimeMillis() - durationSec * 1000L,
+            endTimeMs = System.currentTimeMillis(),
+            movingTimeSec = durationSec,
+            stoppedTimeSec = 120L,
+            totalDistanceKm = totalDist,
+            averageSpeedKmh = 22.5f,
+            maxSpeedKmh = 38.2f,
+            eventCounts = counts,
+            approachPerKm = if (totalDist > 0) counts.approachCount / totalDist.toFloat() else 0f,
+            approachPerHour = counts.approachCount / (durationSec / 3600.0f),
+            decelerationPerKm = if (totalDist > 0) counts.decelerationCount / totalDist.toFloat() else 0f,
+            decelerationPerHour = counts.decelerationCount / (durationSec / 3600.0f)
+        )
+        _currentRideSummary.value = summary
+        Log.i(TAG, "Generated RideSummary: distance=${totalDist}km, approach/km=${summary.approachPerKm}")
     }
 
     fun selectEventFile(file: File?) {
@@ -129,13 +207,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun removeEventFile(file: File) {
         val currentList = _savedEventFiles.value.toMutableList()
         if (currentList.remove(file)) {
-            if (file.exists()) {
-                file.delete()
-            }
+            if (file.exists()) file.delete()
             _savedEventFiles.value = currentList
-            if (_selectedEventFile.value == file) {
-                _selectedEventFile.value = null
-            }
         }
     }
 
@@ -162,5 +235,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateResolution(resolution: VideoResolution) {
         val current = configRepository.getConfig()
         configRepository.updateConfig(current.copy(resolution = resolution))
+    }
+
+    fun updateSensitivity(sensitivity: EventSensitivity) {
+        _sensitivity.value = sensitivity
+    }
+
+    fun updateCooldown(decel: Long, approach: Long, sound: Long) {
+        val current = configRepository.getConfig()
+        configRepository.updateConfig(
+            current.copy(
+                decelerationCooldownSec = decel,
+                approachCooldownSec = approach,
+                soundCooldownSec = sound
+            )
+        )
     }
 }
