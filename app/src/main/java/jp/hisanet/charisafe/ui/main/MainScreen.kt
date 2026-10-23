@@ -53,12 +53,12 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import jp.hisanet.charisafe.domain.model.ActiveCamera
 import jp.hisanet.charisafe.domain.model.RecordingState
-import jp.hisanet.charisafe.domain.model.VideoResolution
 import kotlinx.coroutines.delay
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
 fun MainScreen(
@@ -155,7 +155,7 @@ fun MainScreen(
 
     LaunchedEffect(Unit) {
         while (true) {
-            delay(3000L)
+            delay(3000L.milliseconds)
             viewModel.loadExistingEvents()
         }
     }
@@ -220,7 +220,7 @@ fun MainScreen(
                 modifier = Modifier.fillMaxWidth().padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(text = "現在速度", fontSize = 14.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(text = "速度", fontSize = 14.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 Text(
                     text = String.format(Locale.US, "%.1f", uiState.status.currentSpeedKmh),
                     fontSize = 52.sp,
