@@ -7,14 +7,15 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Log
 import kotlin.math.abs
+import kotlin.math.pow
 
 class AudioImpactDetector(
+    private val getSoundSensitivityDb: () -> Float, // ユーザー設定の dB 値 (例: 70dB〜100dB, デフォルト85dB)
     private val onLoudSoundDetected: () -> Unit
 ) {
     companion object {
         private const val TAG = "AudioImpactDetector"
         private const val SAMPLE_RATE = 8000
-        private const val AMPLITUDE_THRESHOLD = 25000 // 大きな音・衝突音を想定した振幅閾値
     }
 
     private var audioRecord: AudioRecord? = null
@@ -65,17 +66,23 @@ class AudioImpactDetector(
                             }
                         }
 
+                        // ユーザー設定の dB 値をリニア振幅閾値に変換 (例: 70dB=敏感, 100dB=鈍感)
+                        // dBから振幅への簡易換算: 100dBを最高値(32767)とし、設定dBに応じた閾値を算出
+                        val currentDbSetting = getSoundSensitivityDb().coerceIn(70f, 100f)
+                        // 設定dBが低いほど少ない音量(低い振幅)で検知する (例: 70dB設定なら約1000の振幅で反応)
+                        val thresholdAmplitude = (32767.0 * (currentDbSetting - 60.0) / 40.0).toInt().coerceIn(500, 32000)
+
                         val now = System.currentTimeMillis()
-                        if (maxAmplitude >= AMPLITUDE_THRESHOLD && now - lastTriggerTime > 10000L) {
+                        if (maxAmplitude >= thresholdAmplitude && now - lastTriggerTime > 15000L) { // クールダウン15秒
                             lastTriggerTime = now
-                            Log.w(TAG, "💥 [AudioImpact] 大きな音(衝突音)を検知! Amplitude: $maxAmplitude")
+                            Log.w(TAG, "💥 [AudioImpact] 大音量検知! Amp: $maxAmplitude (Threshold: $thresholdAmplitude for ${currentDbSetting}dB)")
                             onLoudSoundDetected()
                         }
                     }
                 }
             }.apply { start() }
 
-            Log.i(TAG, "Started listening to microphone audio for impact/loud sound detection")
+            Log.i(TAG, "Started listening to microphone audio with dynamic dB sensitivity")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start AudioImpactDetector", e)
         }
