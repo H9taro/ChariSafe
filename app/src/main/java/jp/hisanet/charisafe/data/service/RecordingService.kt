@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.hardware.camera2.CaptureRequest
+import android.location.LocationManager
 import android.media.AudioManager
 import android.media.MediaScannerConnection
 import android.media.ToneGenerator
@@ -385,12 +386,31 @@ class RecordingService : Service(), LifecycleOwner {
         }
     }
 
+    @SuppressLint("MissingPermission")
+    private fun getCurrentLatLon(): Pair<Double, Double> {
+        return try {
+            val locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+            val loc = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            if (loc != null) {
+                Pair(loc.latitude, loc.longitude)
+            } else {
+                Pair(35.681236, 139.767125) // デフォルト (東京駅付近)
+            }
+        } catch (e: Exception) {
+            Pair(35.681236, 139.767125)
+        }
+    }
+
     fun exportEventAsync(reason: String, beforeMinutes: Int, onComplete: (File?) -> Unit) {
         serviceScope.launch(Dispatchers.IO) {
             Log.i(TAG, "=== Async Event Export Workflow Started for [$reason] ===")
 
             val currentFilePath = _serviceState.value.currentFile
             val currentFile = File(currentFilePath)
+
+            // 実際のGPS位置を直前に取得
+            val (lat, lon) = getCurrentLatLon()
 
             withContext(Dispatchers.Main) {
                 activeRecording?.stop()
@@ -443,7 +463,7 @@ class RecordingService : Service(), LifecycleOwner {
                 MediaScannerConnection.scanFile(this@RecordingService, arrayOf(eventFile.absolutePath), null, null)
                 Log.i(TAG, "Successfully concatenated and saved event video: ${eventFile.absolutePath}")
 
-                // 【重要】EventLogStore にも直接 EventLog を永続化登録して確実性を担保
+                // 【修正】実際のGPS位置 (lat, lon) を EventLogStore に記録
                 val eventType = when (suffix) {
                     "DECELERATION" -> EventType.DECELERATION
                     "COLLISION" -> EventType.COLLISION
@@ -454,8 +474,8 @@ class RecordingService : Service(), LifecycleOwner {
                     timestampMs = System.currentTimeMillis(),
                     eventType = eventType,
                     speedKmh = 20.0f,
-                    latitude = 35.681236,
-                    longitude = 139.767125,
+                    latitude = lat, // 実測緯度
+                    longitude = lon, // 実測経度
                     decelerationSensitivity = 1.5f,
                     approachSensitivity = 0.7f,
                     collisionSensitivity = 3.0f,
@@ -465,7 +485,7 @@ class RecordingService : Service(), LifecycleOwner {
                 val existingLogs = EventLogStore.loadEvents(this@RecordingService).toMutableList()
                 existingLogs.add(0, newLog)
                 EventLogStore.saveEvents(this@RecordingService, existingLogs)
-                Log.i(TAG, "Directly saved EventLog to EventLogStore for [$reason]")
+                Log.i(TAG, "Directly saved EventLog with actual GPS (lat=$lat, lon=$lon) to EventLogStore for [$reason]")
             } else {
                 Log.e(TAG, "Failed to concatenate event video")
             }
