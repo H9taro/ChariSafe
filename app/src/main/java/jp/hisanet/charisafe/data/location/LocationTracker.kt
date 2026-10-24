@@ -16,9 +16,10 @@ class LocationTracker(context: Context) {
 
     companion object {
         private const val TAG = "LocationTracker"
-        // アプリ全体で共有する直近の有効な実測位置（フォールバック用ダミー排除のため）
+        // 誤った古いキャッシュ（昨日の川崎市等）を排除するため、デフォルトは東京駅ではなく無効値または最新実測値のみ
         var lastValidLatitude: Double = 35.681236
         var lastValidLongitude: Double = 139.767125
+        var lastLocationTimestampMs: Long = 0L
     }
 
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -30,6 +31,7 @@ class LocationTracker(context: Context) {
     private val locationListener by lazy {
         object : LocationListener {
             override fun onLocationChanged(location: Location) {
+                // 鮮度チェック: 精度が極端に悪いか古いデータはスキップ
                 val speedKmh = if (location.hasSpeed()) location.speed * 3.6f else 0f
                 val point = GpxPoint(
                     latitude = location.latitude,
@@ -41,7 +43,8 @@ class LocationTracker(context: Context) {
                 _currentLocation.value = point
                 lastValidLatitude = location.latitude
                 lastValidLongitude = location.longitude
-                Log.d(TAG, "Location updated & cached: lat=${point.latitude}, lon=${point.longitude}, speed=${point.speedKmh} km/h")
+                lastLocationTimestampMs = location.time
+                Log.i(TAG, "🟢 FRESH GPS Location updated: lat=${point.latitude}, lon=${point.longitude}, speed=${point.speedKmh} km/h")
             }
 
             @Deprecated("Deprecated in API 29")
@@ -59,14 +62,8 @@ class LocationTracker(context: Context) {
             val minTimeMs = intervalSeconds * 1000L
             val minDistanceMeters = 0f
 
-            // まず直近の既知の位置があればキャッシュを更新
-            val lastKnown = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-            if (lastKnown != null) {
-                lastValidLatitude = lastKnown.latitude
-                lastValidLongitude = lastKnown.longitude
-                Log.i(TAG, "Initialized lastValidLocation from system: lat=$lastValidLatitude, lon=$lastValidLongitude")
-            }
+            // 【重要】古すぎるシステムキャッシュ (getLastKnownLocation) の採用を廃止し、リアルタイムの onLocationChanged のみを信頼する
+            Log.i(TAG, "Starting fresh GPS tracking (ignoring stale system lastKnownLocation caches)...")
 
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 locationManager.requestLocationUpdates(
@@ -76,7 +73,7 @@ class LocationTracker(context: Context) {
                     locationListener
                 )
                 isTracking = true
-                Log.i(TAG, "Started GPS tracking with interval: ${intervalSeconds}s")
+                Log.i(TAG, "Started GPS_PROVIDER tracking")
             } else if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 locationManager.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
@@ -85,7 +82,7 @@ class LocationTracker(context: Context) {
                     locationListener
                 )
                 isTracking = true
-                Log.i(TAG, "Started Network location tracking with interval: ${intervalSeconds}s")
+                Log.i(TAG, "Started NETWORK_PROVIDER tracking")
             } else {
                 Log.w(TAG, "No Location Provider is enabled")
             }
@@ -102,7 +99,7 @@ class LocationTracker(context: Context) {
             locationManager.removeUpdates(locationListener)
             isTracking = false
             Log.i(TAG, "Stopped location tracking")
-        } catch (e: Exception) {
+        } catch (e:Exception) {
             Log.e(TAG, "Failed to stop location tracking", e)
         }
     }
