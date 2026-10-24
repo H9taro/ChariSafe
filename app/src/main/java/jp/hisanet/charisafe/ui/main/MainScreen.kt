@@ -9,6 +9,7 @@ import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -78,7 +79,7 @@ fun MainScreen(
     var hasLocationPermission by remember { mutableStateOf(checkLocationPermission(context)) }
 
     // アコーディオン開閉状態
-    var isHistoryExpanded by remember { mutableStateOf(false) }
+    var isHistoryExpanded by remember { mutableStateOf(true) }
     var isSummaryExpanded by remember { mutableStateOf(false) }
     var isSettingsExpanded by remember { mutableStateOf(false) }
 
@@ -221,7 +222,7 @@ fun MainScreen(
         // 【常時表示エリア】
         // ==========================================
 
-        // 1. 現在速度 (タイトル「現在速度」を廃止)
+        // 1. 現在速度 (タイトルなし)
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
@@ -263,26 +264,46 @@ fun MainScreen(
             Spacer(modifier = Modifier.height(12.dp))
         }
 
-        // 3. イベント感度スライダー (タイトル「イベント感度調整」を廃止)
+        // 3. 全4種類のイベント感度スライダー (タイトルなし・表示順統一: 急減速, 接近検知, 衝突・落下, 大音量検知)
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text(text = "急減速閾値: ${uiState.sensitivity.decelerationSensitivity.toInt()} km/h", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                // 急減速 (秒数指定)
+                Text(text = "急減速検出時間: ${String.format(Locale.US, "%.1f", uiState.sensitivity.decelerationSensitivity)} 秒", fontSize = 11.sp, fontWeight = FontWeight.Medium)
                 Slider(
                     value = uiState.sensitivity.decelerationSensitivity,
                     onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(decelerationSensitivity = it)) },
-                    valueRange = 10f..25f,
-                    steps = 15
+                    valueRange = 0.5f..3.0f,
+                    steps = 25
                 )
 
+                // 接近検知 (%)
                 Text(text = "接近検知感度: ${(uiState.sensitivity.approachSensitivity * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Medium)
                 Slider(
                     value = uiState.sensitivity.approachSensitivity,
                     onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(approachSensitivity = it)) },
                     valueRange = 0.3f..1.0f,
                     steps = 7
+                )
+
+                // 衝突・落下 (G)
+                Text(text = "衝突・落下感度: ${String.format(Locale.US, "%.1f", uiState.sensitivity.collisionSensitivity)} G", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                Slider(
+                    value = uiState.sensitivity.collisionSensitivity,
+                    onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(collisionSensitivity = it)) },
+                    valueRange = 2.0f..5.0f,
+                    steps = 15
+                )
+
+                // 大音量検知 (dB)
+                Text(text = "大音量検知感度: ${uiState.sensitivity.soundSensitivity.toInt()} dB", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                Slider(
+                    value = uiState.sensitivity.soundSensitivity,
+                    onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(soundSensitivity = it)) },
+                    valueRange = 70f..100f,
+                    steps = 30
                 )
             }
         }
@@ -292,7 +313,7 @@ fun MainScreen(
         val isRecording = uiState.status.state == RecordingState.RECORDING
         val isExporting = uiState.status.state == RecordingState.EXPORTING
 
-        // 4. 【厳格配置】イベント感度調整とイベント件数サマリの間に配置された 録画スタート / 録画ストップ ボタン (シャッターボタン形状)
+        // 4. 録画スタート / 録画ストップ ボタン (シャッターボタン形状)
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -343,7 +364,7 @@ fun MainScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 5. イベント履歴グループ (フィルタ付き)
+        // 5. イベントフィルタセクション (見切れ防止の横スクロール対応バッジ)
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
@@ -355,23 +376,24 @@ fun MainScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(text = "📊 イベント履歴", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    Text(text = "📊 イベントフィルタ", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
                     if (selectedFilterType != null) {
                         OutlinedButton(onClick = { selectedFilterType = null }, modifier = Modifier.height(28.dp)) {
-                            Text("解除", fontSize = 10.sp)
+                            Text("すべて表示", fontSize = 10.sp)
                         }
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     EventFilterBadge("全(${uiState.eventLogs.size})", isSelected = selectedFilterType == null) { selectedFilterType = null }
-                    EventFilterBadge("⚠(${uiState.eventCounts.decelerationCount})", isSelected = selectedFilterType == EventType.DECELERATION) { selectedFilterType = EventType.DECELERATION }
-                    EventFilterBadge("🚗(${uiState.eventCounts.approachCount})", isSelected = selectedFilterType == EventType.APPROACH) { selectedFilterType = EventType.APPROACH }
-                    EventFilterBadge("💥(${uiState.eventCounts.collisionCount})", isSelected = selectedFilterType == EventType.COLLISION) { selectedFilterType = EventType.COLLISION }
-                    EventFilterBadge("🔊(${uiState.eventCounts.soundCount})", isSelected = selectedFilterType == EventType.SOUND) { selectedFilterType = EventType.SOUND }
+                    // 順序統一: 急減速, 接近検知, 衝突・落下, 大音量検知
+                    EventFilterBadge("⚠ 急減速(${uiState.eventCounts.decelerationCount})", isSelected = selectedFilterType == EventType.DECELERATION) { selectedFilterType = EventType.DECELERATION }
+                    EventFilterBadge("🚗 接近検知(${uiState.eventCounts.approachCount})", isSelected = selectedFilterType == EventType.APPROACH) { selectedFilterType = EventType.APPROACH }
+                    EventFilterBadge("💥 衝突・落下(${uiState.eventCounts.collisionCount})", isSelected = selectedFilterType == EventType.COLLISION) { selectedFilterType = EventType.COLLISION }
+                    EventFilterBadge("🔊 大音量検知(${uiState.eventCounts.soundCount})", isSelected = selectedFilterType == EventType.SOUND) { selectedFilterType = EventType.SOUND }
                 }
             }
         }
@@ -384,7 +406,8 @@ fun MainScreen(
 
         val filteredLogs = if (selectedFilterType == null) uiState.eventLogs else uiState.eventLogs.filter { it.eventType == selectedFilterType }
 
-        AccordionSection(title = "📁 イベント履歴 & 動画一覧 (${filteredLogs.size}件)", expanded = isHistoryExpanded, onToggle = { isHistoryExpanded = !isHistoryExpanded }) {
+        // 📁 イベント履歴 (動画再生・Map共有統合・発生時感度パラメータ表示)
+        AccordionSection(title = "📁 イベント履歴 (${filteredLogs.size}件)", expanded = isHistoryExpanded, onToggle = { isHistoryExpanded = !isHistoryExpanded }) {
             if (filteredLogs.isEmpty()) {
                 Text("該当するイベント履歴はありません", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(8.dp))
             } else {
@@ -394,9 +417,15 @@ fun MainScreen(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
-                            Text(text = "${log.eventType.emoji} ${log.eventType.displayName}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text(text = "${log.eventType.emoji} ${log.eventType.displayName}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             Text(text = "時刻: ${SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US).format(Date(log.timestampMs))}", fontSize = 11.sp, color = Color.Gray)
-                            Text(text = "速度: ${log.speedKmh} km/h | 接近感度: ${(log.approachSensitivity * 100).toInt()}%", fontSize = 11.sp)
+                            Text(text = "速度: ${log.speedKmh} km/h", fontSize = 11.sp)
+                            // 【NEW】イベント発生時の感度設定値を表示
+                            Text(
+                                text = "感度 ➔ 急減速: ${log.decelerationSensitivity}秒, 接近: ${(log.approachSensitivity * 100).toInt()}%, 衝突: ${log.collisionSensitivity}G, 音量: ${log.soundSensitivity.toInt()}dB",
+                                fontSize = 10.sp,
+                                color = Color.DarkGray
+                            )
 
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(
@@ -404,8 +433,9 @@ fun MainScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 if (!log.videoFilePath.isNullOrEmpty()) {
-                                    OutlinedButton(
+                                    Button(
                                         onClick = { shareFile(File(log.videoFilePath)) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                                         modifier = Modifier.weight(1f).height(36.dp)
                                     ) {
                                         Text("▶ 動画再生・共有", fontSize = 11.sp)
@@ -424,29 +454,41 @@ fun MainScreen(
             }
         }
 
+        // 📈 ライドサマリー (走行時間 ＆ 4種すべての危険度定量指標 ＆ GPX経路共有)
         AccordionSection(title = "📈 ライドサマリー & 速度分析", expanded = isSummaryExpanded, onToggle = { isSummaryExpanded = !isSummaryExpanded }) {
             val summary = uiState.currentRideSummary
             if (summary == null) {
                 Text("録画を終了するとライドサマリーが生成されます", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(8.dp))
             } else {
+                val movingMin = summary.movingTimeSec / 60
+                val movingSec = summary.movingTimeSec % 60
                 Column(modifier = Modifier.padding(8.dp)) {
+                    Text(text = "走行時間: ${movingMin}分 ${movingSec}秒 (停止: ${summary.stoppedTimeSec}秒)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Text(text = "総距離: ${String.format(Locale.US, "%.2f", summary.totalDistanceKm)} km", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Text(text = "平均速度: ${String.format(Locale.US, "%.1f", summary.averageSpeedKmh)} km/h (最高: ${summary.maxSpeedKmh} km/h)", fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text(text = "【危険度定量的指標】", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                    Text(text = "【危険度定量的指標 (順序統一)】", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                    // 順序統一: 急減速, 接近検知, 衝突・落下, 大音量検知
+                    Text(text = "⚠ 急減速: ${summary.eventCounts.decelerationCount}件 (${String.format(Locale.US, "%.2f", summary.decelerationPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.decelerationPerHour)}件/h)", fontSize = 11.sp)
                     Text(text = "🚗 接近検知: ${summary.eventCounts.approachCount}件 (${String.format(Locale.US, "%.2f", summary.approachPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.approachPerHour)}件/h)", fontSize = 11.sp)
-                    Text(text = "⚠ 急減速: ${summary.eventCounts.decelerationCount}件 (${String.format(Locale.US, "%.2f", summary.decelerationPerKm)}件/km | ${String.format(Locale.US, "%.2f", summary.decelerationPerHour)}件/h)", fontSize = 11.sp)
+                    Text(text = "💥 衝突・落下: ${summary.eventCounts.collisionCount}件 (${String.format(Locale.US, "%.2f", summary.collisionPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.collisionPerHour)}件/h)", fontSize = 11.sp)
+                    Text(text = "🔊 大音量検知: ${summary.eventCounts.soundCount}件 (${String.format(Locale.US, "%.2f", summary.soundPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.soundPerHour)}件/h)", fontSize = 11.sp)
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = { shareRoute() },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+                        modifier = Modifier.fillMaxWidth().height(36.dp)
+                    ) {
+                        Text("🌐 走行経路を共有 (GPX)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
 
-        AccordionSection(title = "⚙️ 録画設定 (停止中のみ変更可)", expanded = isSettingsExpanded, onToggle = { isSettingsExpanded = !isSettingsExpanded }) {
+        // ⚙️ 録画設定 (文言整理・録画中のクリア設定ロック)
+        AccordionSection(title = "⚙️ 録画設定", expanded = isSettingsExpanded, onToggle = { isSettingsExpanded = !isSettingsExpanded }) {
             Column(modifier = Modifier.padding(8.dp)) {
-                if (isRecording) {
-                    Text(text = "※録画中は設定変更できません", fontSize = 11.sp, color = Color.Red)
-                    Spacer(modifier = Modifier.height(4.dp))
-                }
-
                 DropdownSettingItem(
                     label = "撮影カメラ",
                     currentValue = if (uiState.config.activeCamera == ActiveCamera.REAR) "後方 (リア)" else "前方 (フロント)",
@@ -485,28 +527,21 @@ fun MainScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
-                    modifier = Modifier.fillMaxWidth().clickable {
-                        viewModel.updateClearPreviousData(!uiState.config.clearPreviousLogsAndVideosOnStart)
+                    modifier = Modifier.fillMaxWidth().clickable(enabled = !isRecording) {
+                        if (!isRecording) viewModel.updateClearPreviousData(!uiState.config.clearPreviousLogsAndVideosOnStart)
                     }.padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(text = "起動時に過去のログ・動画をクリア", fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                        Text(text = "（問題切り分け用・デフォルトOFF）", fontSize = 10.sp, color = Color.Gray)
+                        Text(text = "起動時に過去のログ・動画をクリア", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (isRecording) Color.Gray else Color.Unspecified)
+                        Text(text = "（問題切り分け用）", fontSize = 10.sp, color = Color.Gray)
                     }
                     Checkbox(
                         checked = uiState.config.clearPreviousLogsAndVideosOnStart,
-                        onCheckedChange = { viewModel.updateClearPreviousData(it) }
+                        onCheckedChange = { if (!isRecording) viewModel.updateClearPreviousData(it) },
+                        enabled = !isRecording
                     )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = { shareRoute() },
-                    modifier = Modifier.fillMaxWidth().height(36.dp)
-                ) {
-                    Text("🌐 走行経路を共有 (GPX)", fontSize = 12.sp)
                 }
             }
         }
