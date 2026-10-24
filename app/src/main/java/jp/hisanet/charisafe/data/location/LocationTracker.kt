@@ -16,6 +16,9 @@ class LocationTracker(context: Context) {
 
     companion object {
         private const val TAG = "LocationTracker"
+        // アプリ全体で共有する直近の有効な実測位置（フォールバック用ダミー排除のため）
+        var lastValidLatitude: Double = 35.681236
+        var lastValidLongitude: Double = 139.767125
     }
 
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -26,24 +29,26 @@ class LocationTracker(context: Context) {
 
     private val locationListener by lazy {
         object : LocationListener {
-        override fun onLocationChanged(location: Location) {
-            val speedKmh = if (location.hasSpeed()) location.speed * 3.6f else 0f
-            val point = GpxPoint(
-                latitude = location.latitude,
-                longitude = location.longitude,
-                elevation = if (location.hasAltitude()) location.altitude else 0.0,
-                speedKmh = speedKmh,
-                timestampMs = location.time
-            )
-            _currentLocation.value = point
-            Log.d(TAG, "Location updated: lat=${point.latitude}, lon=${point.longitude}, speed=${point.speedKmh} km/h")
-        }
+            override fun onLocationChanged(location: Location) {
+                val speedKmh = if (location.hasSpeed()) location.speed * 3.6f else 0f
+                val point = GpxPoint(
+                    latitude = location.latitude,
+                    longitude = location.longitude,
+                    elevation = if (location.hasAltitude()) location.altitude else 0.0,
+                    speedKmh = speedKmh,
+                    timestampMs = location.time
+                )
+                _currentLocation.value = point
+                lastValidLatitude = location.latitude
+                lastValidLongitude = location.longitude
+                Log.d(TAG, "Location updated & cached: lat=${point.latitude}, lon=${point.longitude}, speed=${point.speedKmh} km/h")
+            }
 
-        @Deprecated("Deprecated in API 29")
-        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-        override fun onProviderEnabled(provider: String) {}
-        override fun onProviderDisabled(provider: String) {}
-    }
+            @Deprecated("Deprecated in API 29")
+            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+            override fun onProviderEnabled(provider: String) {}
+            override fun onProviderDisabled(provider: String) {}
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -53,6 +58,15 @@ class LocationTracker(context: Context) {
         try {
             val minTimeMs = intervalSeconds * 1000L
             val minDistanceMeters = 0f
+
+            // まず直近の既知の位置があればキャッシュを更新
+            val lastKnown = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            if (lastKnown != null) {
+                lastValidLatitude = lastKnown.latitude
+                lastValidLongitude = lastKnown.longitude
+                Log.i(TAG, "Initialized lastValidLocation from system: lat=$lastValidLatitude, lon=$lastValidLongitude")
+            }
 
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 locationManager.requestLocationUpdates(

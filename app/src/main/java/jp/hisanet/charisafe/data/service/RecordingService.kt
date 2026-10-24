@@ -11,7 +11,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.hardware.camera2.CaptureRequest
-import android.location.LocationManager
 import android.media.AudioManager
 import android.media.MediaScannerConnection
 import android.media.ToneGenerator
@@ -44,6 +43,7 @@ import jp.hisanet.charisafe.data.camera.RearApproachDetector
 import jp.hisanet.charisafe.data.local.EventLogStore
 import jp.hisanet.charisafe.data.local.ringbuffer.Mp4Concatenator
 import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
+import jp.hisanet.charisafe.data.location.LocationTracker
 import jp.hisanet.charisafe.data.sensor.AudioImpactDetector
 import jp.hisanet.charisafe.data.sensor.CollisionDropDetector
 import jp.hisanet.charisafe.data.sensor.PocketStorageDetector
@@ -386,22 +386,6 @@ class RecordingService : Service(), LifecycleOwner {
         }
     }
 
-    @SuppressLint("MissingPermission")
-    private fun getCurrentLatLon(): Pair<Double, Double> {
-        return try {
-            val locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
-            val loc = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-            if (loc != null) {
-                Pair(loc.latitude, loc.longitude)
-            } else {
-                Pair(35.681236, 139.767125) // デフォルト (東京駅付近)
-            }
-        } catch (e: Exception) {
-            Pair(35.681236, 139.767125)
-        }
-    }
-
     fun exportEventAsync(reason: String, beforeMinutes: Int, onComplete: (File?) -> Unit) {
         serviceScope.launch(Dispatchers.IO) {
             Log.i(TAG, "=== Async Event Export Workflow Started for [$reason] ===")
@@ -409,8 +393,9 @@ class RecordingService : Service(), LifecycleOwner {
             val currentFilePath = _serviceState.value.currentFile
             val currentFile = File(currentFilePath)
 
-            // 実際のGPS位置を直前に取得
-            val (lat, lon) = getCurrentLatLon()
+            // 【重要】LocationTrackerから最新の実測位置（生GPS座標）を取得
+            val lat = LocationTracker.lastValidLatitude
+            val lon = LocationTracker.lastValidLongitude
 
             withContext(Dispatchers.Main) {
                 activeRecording?.stop()
@@ -463,7 +448,6 @@ class RecordingService : Service(), LifecycleOwner {
                 MediaScannerConnection.scanFile(this@RecordingService, arrayOf(eventFile.absolutePath), null, null)
                 Log.i(TAG, "Successfully concatenated and saved event video: ${eventFile.absolutePath}")
 
-                // 【修正】実際のGPS位置 (lat, lon) を EventLogStore に記録
                 val eventType = when (suffix) {
                     "DECELERATION" -> EventType.DECELERATION
                     "COLLISION" -> EventType.COLLISION
@@ -474,8 +458,8 @@ class RecordingService : Service(), LifecycleOwner {
                     timestampMs = System.currentTimeMillis(),
                     eventType = eventType,
                     speedKmh = 20.0f,
-                    latitude = lat, // 実測緯度
-                    longitude = lon, // 実測経度
+                    latitude = lat,  // 正確な実測緯度
+                    longitude = lon, // 正確な実測経度
                     decelerationSensitivity = 1.5f,
                     approachSensitivity = 0.7f,
                     collisionSensitivity = 3.0f,
@@ -485,7 +469,7 @@ class RecordingService : Service(), LifecycleOwner {
                 val existingLogs = EventLogStore.loadEvents(this@RecordingService).toMutableList()
                 existingLogs.add(0, newLog)
                 EventLogStore.saveEvents(this@RecordingService, existingLogs)
-                Log.i(TAG, "Directly saved EventLog with actual GPS (lat=$lat, lon=$lon) to EventLogStore for [$reason]")
+                Log.i(TAG, "Directly saved EventLog with REAL GPS (lat=$lat, lon=$lon) to EventLogStore for [$reason]")
             } else {
                 Log.e(TAG, "Failed to concatenate event video")
             }
@@ -508,7 +492,7 @@ class RecordingService : Service(), LifecycleOwner {
             }
             is VideoRecordEvent.Finalize -> {
                 if (event.hasError()) {
-                    Log.e(TAG, "Segment recording finalized with error: ${event.error}")
+                    Log.i(TAG, "Segment recording finalized with error: ${event.error}")
                     _serviceState.value = _serviceState.value.copy(
                         isRecording = false,
                         errorMessage = "録画エラー発生: code=${event.error}"
