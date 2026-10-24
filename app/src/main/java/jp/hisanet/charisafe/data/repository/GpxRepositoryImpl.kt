@@ -32,7 +32,9 @@ class GpxRepositoryImpl(private val context: Context) : GpxRepository {
 
     var onDecelerationDetected: (() -> Unit)? = null
 
-    private val decelerationDetector = SpeedDecelerationDetector {
+    private val decelerationDetector = SpeedDecelerationDetector(
+        getTargetSeconds = { 1.5f }
+    ) {
         Log.w(TAG, "🚨 急減速検知コールバック発火 -> 自動イベント保存を実行します")
         onDecelerationDetected?.invoke()
     }
@@ -67,7 +69,7 @@ class GpxRepositoryImpl(private val context: Context) : GpxRepository {
         locationTracker.stopTracking()
         gpxWriter = null
         activeGpxFile = null
-        Log.i(TAG, "Stopped GPX logging")
+        Log.i(TAG, "Stopped logging")
     }
 
     override fun getActiveGpxFilePath(): String? {
