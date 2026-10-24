@@ -56,10 +56,10 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import jp.hisanet.charisafe.data.location.LocationTracker
 import jp.hisanet.charisafe.domain.model.ActiveCamera
 import jp.hisanet.charisafe.domain.model.EventType
 import jp.hisanet.charisafe.domain.model.RecordingState
-import jp.hisanet.charisafe.util.FileUtils
 import kotlinx.coroutines.delay
 import java.io.File
 import java.text.SimpleDateFormat
@@ -155,33 +155,16 @@ fun MainScreen(
         }
     }
 
-    // 【修正】最新の GPX ログファイルそのものを FileProvider 経由で共有し、Google Maps / Earth 等にインテント連携
     val shareRoute = {
-        try {
-            val gpxDir = FileUtils.getGpxDir(context)
-            val latestGpxFile = gpxDir.listFiles { _, name -> name.startsWith("ride_") && name.endsWith(".gpx") }
-                ?.sortedByDescending { it.lastModified() }
-                ?.firstOrNull()
-
-            if (latestGpxFile != null && latestGpxFile.exists() && latestGpxFile.length() > 0) {
-                val uri = FileProvider.getUriForFile(
-                    context,
-                    "${context.packageName}.fileprovider",
-                    latestGpxFile
-                )
-                val intent = Intent(Intent.ACTION_SEND).apply {
-                    type = "*/*" // GPXファイルインテント
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                context.startActivity(Intent.createChooser(intent, "走行経路(GPX)をGoogle Maps等に共有"))
-            } else {
-                Toast.makeText(context, "共有できるGPXログファイルが見つかりません", Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(context, "GPX共有エラー: ${e.message}", Toast.LENGTH_SHORT).show()
+        // 【修正】固定のダミー座標ではなく、LocationTrackerが保持する直近の実測現在地を使用
+        val lat = LocationTracker.lastValidLatitude
+        val lon = LocationTracker.lastValidLongitude
+        val mapsUrl = "https://maps.google.com/?q=$lat,$lon"
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, "「現在ChariSafeで走行中です！」\nルート位置: $mapsUrl")
         }
+        context.startActivity(Intent.createChooser(intent, "走行経路を共有"))
     }
 
     LaunchedEffect(Unit) {
@@ -416,7 +399,8 @@ fun MainScreen(
                         Column(modifier = Modifier.padding(12.dp)) {
                             Text(text = "${log.eventType.emoji} ${log.eventType.displayName}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             Text(text = "時刻: ${SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US).format(Date(log.timestampMs))}", fontSize = 11.sp, color = Color.Gray)
-                            Text(text = "速度: ${log.speedKmh} km/h | 接近感度: ${(log.approachSensitivity * 100).toInt()}%", fontSize = 11.sp)
+                            Text(text = "速度: ${log.speedKmh} km/h", fontSize = 11.sp)
+                            Text(text = "感度設定 ➔ 接近: ${(log.approachSensitivity * 100).toInt()}%, 減速: ${log.decelerationSensitivity}秒", fontSize = 10.sp, color = Color.DarkGray)
 
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(
@@ -456,9 +440,12 @@ fun MainScreen(
                     Text(text = "総距離: ${String.format(Locale.US, "%.2f", summary.totalDistanceKm)} km", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Text(text = "平均速度: ${String.format(Locale.US, "%.1f", summary.averageSpeedKmh)} km/h (最高: ${summary.maxSpeedKmh} km/h)", fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text(text = "【危険度定定量指標】", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                    Text(text = "🚗 接近検知: ${summary.eventCounts.approachCount}件 (${String.format(Locale.US, "%.2f", summary.approachPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.approachPerHour)}件/h)", fontSize = 11.sp)
-                    Text(text = "⚠ 急減速: ${summary.eventCounts.decelerationCount}件 (${String.format(Locale.US, "%.2f", summary.decelerationPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.decelerationPerHour)}件/h)", fontSize = 11.sp)
+                    Text(text = "【危険度定量的指標】", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                    // 順序統一: 減速, 接近, 衝撃, 音量
+                    Text(text = "⚠ 減速: ${summary.eventCounts.decelerationCount}件 (${String.format(Locale.US, "%.2f", summary.decelerationPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.decelerationPerHour)}件/h)", fontSize = 11.sp)
+                    Text(text = "🚗 接近: ${summary.eventCounts.approachCount}件 (${String.format(Locale.US, "%.2f", summary.approachPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.approachPerHour)}件/h)", fontSize = 11.sp)
+                    Text(text = "💥 衝撃: ${summary.eventCounts.collisionCount}件 (${String.format(Locale.US, "%.2f", summary.collisionPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.collisionPerHour)}件/h)", fontSize = 11.sp)
+                    Text(text = "🔊 音量: ${summary.eventCounts.soundCount}件 (${String.format(Locale.US, "%.2f", summary.soundPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.soundPerHour)}件/h)", fontSize = 11.sp)
 
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(
@@ -466,7 +453,7 @@ fun MainScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
                         modifier = Modifier.fillMaxWidth().height(36.dp)
                     ) {
-                        Text("🌐 走行経路を共有 (GPXファイル)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("🌐 走行経路を共有 (GPX)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
