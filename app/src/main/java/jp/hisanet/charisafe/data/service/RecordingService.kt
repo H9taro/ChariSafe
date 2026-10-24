@@ -42,14 +42,10 @@ import jp.hisanet.charisafe.R
 import jp.hisanet.charisafe.data.camera.RearApproachDetector
 import jp.hisanet.charisafe.data.local.ringbuffer.Mp4Concatenator
 import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
-import jp.hisanet.charisafe.data.repository.EventLogRepositoryImpl
 import jp.hisanet.charisafe.data.sensor.AudioImpactDetector
 import jp.hisanet.charisafe.data.sensor.CollisionDropDetector
 import jp.hisanet.charisafe.data.sensor.PocketStorageDetector
 import jp.hisanet.charisafe.domain.model.ActiveCamera
-import jp.hisanet.charisafe.domain.model.EventLog
-import jp.hisanet.charisafe.domain.model.EventType
-import jp.hisanet.charisafe.domain.repository.EventLogRepository
 import jp.hisanet.charisafe.poc.PocMetricsLogger
 import jp.hisanet.charisafe.util.FileUtils
 import kotlinx.coroutines.CoroutineScope
@@ -105,8 +101,6 @@ class RecordingService : Service(), LifecycleOwner {
     private var collisionDropDetector: CollisionDropDetector? = null
     private var audioImpactDetector: AudioImpactDetector? = null
 
-    private val eventLogRepository: EventLogRepository by lazy { EventLogRepositoryImpl(applicationContext) }
-
     private var activeCamera: ActiveCamera = ActiveCamera.REAR
     private var ringBufferMinutes: Int = 5
     private var targetFps: Int = 10
@@ -150,12 +144,12 @@ class RecordingService : Service(), LifecycleOwner {
 
         collisionDropDetector = CollisionDropDetector(this) {
             Log.w(TAG, "💥 衝突・落下検知トリガー受領 -> 警告音＋自動イベント保存を実行します")
-            triggerAutoEventWithAlert(EventType.COLLISION)
+            triggerAutoEventWithAlert("衝突・落下検知")
         }
 
         audioImpactDetector = AudioImpactDetector {
             Log.w(TAG, "💥 [AudioImpact] 大きな音(衝突音)検知トリガー受領 -> 警告音＋自動イベント保存を実行します")
-            triggerAutoEventWithAlert(EventType.SOUND)
+            triggerAutoEventWithAlert("大きな音(衝突音)検知")
         }
     }
 
@@ -320,7 +314,7 @@ class RecordingService : Service(), LifecycleOwner {
                 .apply {
                     setAnalyzer(analysisExecutor, RearApproachDetector {
                         Log.w(TAG, "🚨 [Priority2] 接近検知発火 -> 警告音＋自動イベント保存を実行します")
-                        triggerAutoEventWithAlert(EventType.APPROACH)
+                        triggerAutoEventWithAlert("接近検知")
                     })
                 }
 
@@ -371,39 +365,26 @@ class RecordingService : Service(), LifecycleOwner {
         startMetricsLoggingJob()
     }
 
-    fun triggerAutoEventWithAlert(eventType: EventType) {
+    fun triggerAutoEventWithAlert(reason: String) {
         try {
             toneGenerator.startTone(ToneGenerator.TONE_DTMF_S, 800)
-            Log.i(TAG, "🔊 警告音鳴動 (${eventType.displayName})")
+            Log.i(TAG, "🔊 警告音鳴動 ($reason)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to play alert tone", e)
         }
 
-        exportEventAsync(ringBufferMinutes) { file ->
+        exportEventAsync(reason, ringBufferMinutes) { file ->
             if (file != null) {
-                Log.i(TAG, "✨ Auto-saved event video for [${eventType.displayName}]: ${file.absolutePath}")
-                
-                val log = EventLog(
-                    eventType = eventType,
-                    speedKmh = 25.0f,
-                    latitude = 35.681236,
-                    longitude = 139.767125,
-                    decelerationSensitivity = 15.0f,
-                    approachSensitivity = 0.7f,
-                    collisionSensitivity = 3.0f,
-                    soundSensitivity = 25000f,
-                    videoFilePath = file.absolutePath
-                )
-                eventLogRepository.addEvent(log)
+                Log.i(TAG, "✨ Auto-saved event video for [$reason]: ${file.absolutePath}")
             } else {
-                Log.e(TAG, "❌ Failed to auto-save event video for [${eventType.displayName}]")
+                Log.e(TAG, "❌ Failed to auto-save event video for [$reason]")
             }
         }
     }
 
-    fun exportEventAsync(beforeMinutes: Int, onComplete: (File?) -> Unit) {
+    fun exportEventAsync(reason: String, beforeMinutes: Int, onComplete: (File?) -> Unit) {
         serviceScope.launch(Dispatchers.IO) {
-            Log.i(TAG, "=== Async Event Export Workflow Started ===")
+            Log.i(TAG, "=== Async Event Export Workflow Started for [$reason] ===")
 
             val currentFilePath = _serviceState.value.currentFile
             val currentFile = File(currentFilePath)
@@ -437,9 +418,18 @@ class RecordingService : Service(), LifecycleOwner {
                 setupVideoCaptureAndStart()
             }
 
+            // イベント種別サフィックスの付与 (フェーズ3仕様)
+            val suffix = when (reason) {
+                "後方接近検知", "接近検知" -> "APPROACH"
+                "急減速検知" -> "DECELERATION"
+                "衝突・落下検知" -> "COLLISION"
+                "大きな音(衝突音)検知" -> "SOUND"
+                else -> "APPROACH"
+            }
+
             val recordingsDir = FileUtils.getRecordingsDir(this@RecordingService)
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val eventFile = File(recordingsDir, "event_${timestamp}.mp4")
+            val eventFile = File(recordingsDir, "event_${timestamp}_${suffix}.mp4")
 
             val success = Mp4Concatenator.concatenate(workingFiles, eventFile)
 
@@ -449,7 +439,7 @@ class RecordingService : Service(), LifecycleOwner {
 
             if (success) {
                 MediaScannerConnection.scanFile(this@RecordingService, arrayOf(eventFile.absolutePath), null, null)
-                Log.i(TAG, "Successfully concatenated and saved event video: ${eventFile.absolutePath}")
+                Log.i(TAG, "Successfully concatenated and saved event video with suffix [$suffix]: ${eventFile.absolutePath}")
             } else {
                 Log.e(TAG, "Failed to concatenate event video")
             }

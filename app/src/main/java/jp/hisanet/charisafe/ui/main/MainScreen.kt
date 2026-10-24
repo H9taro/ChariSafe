@@ -216,7 +216,7 @@ fun MainScreen(
         // 【常時表示エリア】
         // ==========================================
 
-        // 1. 現在速度 (タイトル「現在速度」を廃止)
+        // 1. 現在速度 (タイトルなし)
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
@@ -258,13 +258,14 @@ fun MainScreen(
             Spacer(modifier = Modifier.height(12.dp))
         }
 
-        // 3. イベント感度スライダー (タイトル「イベント感度調整」を廃止)
+        // 3. 全4種類のイベント感度調整スライダー (タイトルなし)
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text(text = "急減速閾値: ${uiState.sensitivity.decelerationSensitivity.toInt()} km/h", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                // 急減速閾値 (減速重視)
+                Text(text = "急減速閾値: ${uiState.sensitivity.decelerationSensitivity.toInt()} km/h", fontSize = 11.sp, fontWeight = FontWeight.Medium)
                 Slider(
                     value = uiState.sensitivity.decelerationSensitivity,
                     onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(decelerationSensitivity = it)) },
@@ -272,12 +273,31 @@ fun MainScreen(
                     steps = 15
                 )
 
-                Text(text = "接近検知感度: ${(uiState.sensitivity.approachSensitivity * 100).toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                // 接近検知感度
+                Text(text = "接近検知感度: ${(uiState.sensitivity.approachSensitivity * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Medium)
                 Slider(
                     value = uiState.sensitivity.approachSensitivity,
                     onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(approachSensitivity = it)) },
                     valueRange = 0.3f..1.0f,
                     steps = 7
+                )
+
+                // 衝突・落下感度 (G数)
+                Text(text = "衝突・落下感度: ${String.format(Locale.US, "%.1f", uiState.sensitivity.collisionSensitivity)} G", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                Slider(
+                    value = uiState.sensitivity.collisionSensitivity,
+                    onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(collisionSensitivity = it)) },
+                    valueRange = 2.0f..5.0f,
+                    steps = 15
+                )
+
+                // 大音量感度 (振幅閾値)
+                Text(text = "大音量検知感度: ${(uiState.sensitivity.soundSensitivity / 1000).toInt()} k", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                Slider(
+                    value = uiState.sensitivity.soundSensitivity,
+                    onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(soundSensitivity = it)) },
+                    valueRange = 15000f..35000f,
+                    steps = 20
                 )
             }
         }
@@ -287,7 +307,7 @@ fun MainScreen(
         val isRecording = uiState.status.state == RecordingState.RECORDING
         val isExporting = uiState.status.state == RecordingState.EXPORTING
 
-        // 4. 【厳格配置】イベント感度調整とイベント件数サマリの間に配置された 録画スタート / 録画ストップ ボタン (シャッターボタン形状)
+        // 4. シャッターボタン風 アイコンデザイン (感度スライダーとイベント履歴グループの間)
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -338,7 +358,7 @@ fun MainScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 5. イベント履歴グループ (フィルタ付き)
+        // 5. イベント履歴グループ (分類バッジ付き ＆ タップで指定ジャンル展開)
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
@@ -353,7 +373,7 @@ fun MainScreen(
                     Text(text = "📊 イベント履歴", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
                     if (selectedFilterType != null) {
                         OutlinedButton(onClick = { selectedFilterType = null }, modifier = Modifier.height(28.dp)) {
-                            Text("フィルター解除", fontSize = 10.sp)
+                            Text("解除", fontSize = 10.sp)
                         }
                     }
                 }
@@ -362,11 +382,26 @@ fun MainScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    EventFilterBadge("全(${uiState.eventLogs.size})", isSelected = selectedFilterType == null) { selectedFilterType = null }
-                    EventFilterBadge("⚠(${uiState.eventCounts.decelerationCount})", isSelected = selectedFilterType == EventType.DECELERATION) { selectedFilterType = EventType.DECELERATION }
-                    EventFilterBadge("🚗(${uiState.eventCounts.approachCount})", isSelected = selectedFilterType == EventType.APPROACH) { selectedFilterType = EventType.APPROACH }
-                    EventFilterBadge("💥(${uiState.eventCounts.collisionCount})", isSelected = selectedFilterType == EventType.COLLISION) { selectedFilterType = EventType.COLLISION }
-                    EventFilterBadge("🔊(${uiState.eventCounts.soundCount})", isSelected = selectedFilterType == EventType.SOUND) { selectedFilterType = EventType.SOUND }
+                    EventFilterBadge("全(${uiState.eventLogs.size})", isSelected = selectedFilterType == null) {
+                        selectedFilterType = null
+                        isHistoryExpanded = true
+                    }
+                    EventFilterBadge("⚠(${uiState.eventCounts.decelerationCount})", isSelected = selectedFilterType == EventType.DECELERATION) {
+                        selectedFilterType = EventType.DECELERATION
+                        isHistoryExpanded = true
+                    }
+                    EventFilterBadge("🚗(${uiState.eventCounts.approachCount})", isSelected = selectedFilterType == EventType.APPROACH) {
+                        selectedFilterType = EventType.APPROACH
+                        isHistoryExpanded = true
+                    }
+                    EventFilterBadge("💥(${uiState.eventCounts.collisionCount})", isSelected = selectedFilterType == EventType.COLLISION) {
+                        selectedFilterType = EventType.COLLISION
+                        isHistoryExpanded = true
+                    }
+                    EventFilterBadge("🔊(${uiState.eventCounts.soundCount})", isSelected = selectedFilterType == EventType.SOUND) {
+                        selectedFilterType = EventType.SOUND
+                        isHistoryExpanded = true
+                    }
                 }
             }
         }
@@ -379,7 +414,8 @@ fun MainScreen(
 
         val filteredLogs = if (selectedFilterType == null) uiState.eventLogs else uiState.eventLogs.filter { it.eventType == selectedFilterType }
 
-        AccordionSection(title = "📁 イベント履歴 & 動画一覧 (${filteredLogs.size}件)", expanded = isHistoryExpanded, onToggle = { isHistoryExpanded = !isHistoryExpanded }) {
+        // 📁 イベント履歴 (動画保存を完全に統合・ファイル名は隠す)
+        AccordionSection(title = "📁 イベント履歴 (${filteredLogs.size}件)", expanded = isHistoryExpanded, onToggle = { isHistoryExpanded = !isHistoryExpanded }) {
             if (filteredLogs.isEmpty()) {
                 Text("該当するイベント履歴はありません", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(8.dp))
             } else {
@@ -389,9 +425,9 @@ fun MainScreen(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
-                            Text(text = "${log.eventType.emoji} ${log.eventType.displayName}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text(text = "${log.eventType.emoji} ${log.eventType.displayName}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             Text(text = "時刻: ${SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US).format(Date(log.timestampMs))}", fontSize = 11.sp, color = Color.Gray)
-                            Text(text = "速度: ${log.speedKmh} km/h | 接近感度: ${(log.approachSensitivity * 100).toInt()}%", fontSize = 11.sp)
+                            Text(text = "速度: ${log.speedKmh} km/h", fontSize = 11.sp)
 
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(
@@ -399,8 +435,9 @@ fun MainScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 if (!log.videoFilePath.isNullOrEmpty()) {
-                                    OutlinedButton(
+                                    Button(
                                         onClick = { shareFile(File(log.videoFilePath)) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                                         modifier = Modifier.weight(1f).height(36.dp)
                                     ) {
                                         Text("▶ 動画再生・共有", fontSize = 11.sp)
@@ -410,7 +447,7 @@ fun MainScreen(
                                     onClick = { shareMapLocation(log.latitude, log.longitude) },
                                     modifier = Modifier.weight(1f).height(36.dp)
                                 ) {
-                                    Text("📍 Mapで開く", fontSize = 11.sp)
+                                    Text("📍 Map共有", fontSize = 11.sp)
                                 }
                             }
                         }
@@ -419,7 +456,8 @@ fun MainScreen(
             }
         }
 
-        AccordionSection(title = "📈 ライドサマリー & 速度分析", expanded = isSummaryExpanded, onToggle = { isSummaryExpanded = !isSummaryExpanded }) {
+        // 📈 ライドサマリー & 速度分析
+        AccordionSection(title = "📈 ライドサマリー", expanded = isSummaryExpanded, onToggle = { isSummaryExpanded = !isSummaryExpanded }) {
             val summary = uiState.currentRideSummary
             if (summary == null) {
                 Text("録画を終了するとライドサマリーが生成されます", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(8.dp))
@@ -430,11 +468,12 @@ fun MainScreen(
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(text = "【危険度定量的指標】", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                     Text(text = "🚗 接近検知: ${summary.eventCounts.approachCount}件 (${String.format(Locale.US, "%.2f", summary.approachPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.approachPerHour)}件/h)", fontSize = 11.sp)
-                    Text(text = "⚠ 急減速: ${summary.eventCounts.decelerationCount}件 (${String.format(Locale.US, "%.2f", summary.decelerationPerKm)}件/km | ${String.format(Locale.US, "%.2f", summary.decelerationPerHour)}件/h)", fontSize = 11.sp)
+                    Text(text = "⚠ 急減速: ${summary.eventCounts.decelerationCount}件 (${String.format(Locale.US, "%.2f", summary.decelerationPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.decelerationPerHour)}件/h)", fontSize = 11.sp)
                 }
             }
         }
 
+        // ⚙️ 録画設定 (GPX経路共有ボタン含む)
         AccordionSection(title = "⚙️ 録画設定 (停止中のみ変更可)", expanded = isSettingsExpanded, onToggle = { isSettingsExpanded = !isSettingsExpanded }) {
             Column(modifier = Modifier.padding(8.dp)) {
                 if (isRecording) {
@@ -478,12 +517,13 @@ fun MainScreen(
                     onSelected = { viewModel.updateFps(it) }
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 Button(
                     onClick = { shareRoute() },
-                    modifier = Modifier.fillMaxWidth().height(36.dp)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+                    modifier = Modifier.fillMaxWidth().height(40.dp)
                 ) {
-                    Text("🌐 走行経路を共有 (GPX)", fontSize = 12.sp)
+                    Text("🌐 走行経路を共有 (GPX)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

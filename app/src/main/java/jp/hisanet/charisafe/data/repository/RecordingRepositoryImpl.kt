@@ -6,9 +6,11 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
 import android.util.Log
+import jp.hisanet.charisafe.data.config.ConfigRepositoryImpl
 import jp.hisanet.charisafe.data.service.RecordingService
 import jp.hisanet.charisafe.domain.model.AppConfig
 import jp.hisanet.charisafe.domain.model.RecordingState
+import jp.hisanet.charisafe.domain.repository.ConfigRepository
 import jp.hisanet.charisafe.domain.repository.RecordingRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,6 +27,7 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
         private const val TAG = "RecordingRepositoryImpl"
     }
 
+    private val configRepository: ConfigRepository = ConfigRepositoryImpl(context)
     private var recordingService: RecordingService? = null
     private var isBound = false
 
@@ -54,7 +57,6 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
     override fun startRecording(config: AppConfig) {
         val startIntent = Intent(context, RecordingService::class.java).apply {
             action = RecordingService.ACTION_START_RECORDING
-            putExtra(RecordingService.EXTRA_ACTIVE_CAMERA, config.activeCamera.name)
             putExtra(RecordingService.EXTRA_TARGET_FPS, config.fps)
             putExtra(RecordingService.EXTRA_RESOLUTION_WIDTH, config.resolution.width)
             putExtra(RecordingService.EXTRA_RESOLUTION_HEIGHT, config.resolution.height)
@@ -62,7 +64,7 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
         }
         context.startForegroundService(startIntent)
         _recordingState.value = RecordingState.RECORDING
-        Log.i(TAG, "Started recording with active camera: ${config.activeCamera}, config: $config")
+        Log.i(TAG, "Started recording with config: $config")
     }
 
     override fun stopRecording() {
@@ -84,8 +86,11 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
         }
 
         try {
-            val eventFile = suspendCancellableCoroutine { continuation ->
-                service.exportEventAsync(beforeMinutes) { file ->
+            val currentConfig = configRepository.getConfig()
+            val targetMinutes = currentConfig.ringBufferMinutes
+
+            val eventFile = suspendCancellableCoroutine<File?> { continuation ->
+                service.exportEventAsync("手動保存", targetMinutes) { file ->
                     continuation.resume(file)
                 }
             }
@@ -93,7 +98,7 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
             _recordingState.value = RecordingState.RECORDING
 
             if (eventFile != null) {
-                Log.i(TAG, "Successfully exported manual event video: ${eventFile.absolutePath}")
+                Log.i(TAG, "Successfully exported manual event video (${targetMinutes}m limit): ${eventFile.absolutePath}")
                 eventFile
             } else {
                 Log.e(TAG, "Failed to export manual event video")
