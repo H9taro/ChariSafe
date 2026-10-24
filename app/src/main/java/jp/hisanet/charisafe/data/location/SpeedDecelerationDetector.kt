@@ -4,13 +4,12 @@ import android.util.Log
 import jp.hisanet.charisafe.domain.model.GpxPoint
 
 class SpeedDecelerationDetector(
+    private val getSensitivity: () -> Float, // 感度スライダーから取得する減速にかかる秒数閾値 (例: 2.0秒)
     private val onDecelerationDetected: () -> Unit
 ) {
     companion object {
         private const val TAG = "SpeedDecelerationDetector"
-        private const val MIN_INITIAL_SPEED_KMH = 15.0f // 15km/h以上から
-        private const val MAX_FINAL_SPEED_KMH = 5.0f  // 5km/h未満へ
-        private const val MAX_DURATION_MS = 3000L      // 3秒以内
+        private const val MIN_DROP_SPEED_KMH = 10.0f // 10km/h以上の速度差
     }
 
     private val speedHistory = mutableListOf<GpxPoint>()
@@ -20,7 +19,7 @@ class SpeedDecelerationDetector(
         val now = point.timestampMs
         speedHistory.add(point)
 
-        // 古い履歴（3秒以上前）を削除
+        // 過去5秒間の履歴を保持
         speedHistory.removeAll { now - it.timestampMs > 5000L }
 
         if (speedHistory.size < 2) return
@@ -29,12 +28,17 @@ class SpeedDecelerationDetector(
         val latest = speedHistory.last()
 
         val timeDeltaMs = latest.timestampMs - oldest.timestampMs
-        if (timeDeltaMs in 1L..MAX_DURATION_MS) {
+        val targetSeconds = getSensitivity() // 例: 2.0秒以内
+        val maxDurationMs = (targetSeconds * 1000f).toLong().coerceIn(1000L, 5000L)
+
+        if (timeDeltaMs in 1L..maxDurationMs) {
             val initialSpeed = oldest.speedKmh
             val finalSpeed = latest.speedKmh
+            val dropSpeed = initialSpeed - finalSpeed
 
-            if (initialSpeed >= MIN_INITIAL_SPEED_KMH && finalSpeed < MAX_FINAL_SPEED_KMH) {
-                Log.w(TAG, "🚨 急減速検知! Initial: ${initialSpeed}km/h -> Final: ${finalSpeed}km/h in ${timeDeltaMs}ms")
+            // 巡行速度から設定秒数以内に10km/h以上急低下、かつ5km/h未満へ
+            if (initialSpeed >= 15.0f && dropSpeed >= MIN_DROP_SPEED_KMH && finalSpeed < 5.0f) {
+                Log.w(TAG, "🚨 急減速検知! Initial: ${initialSpeed}km/h -> Final: ${finalSpeed}km/h (Drop: ${dropSpeed}km/h) in ${timeDeltaMs}ms (Target: ${targetSeconds}s)")
                 speedHistory.clear()
                 onDecelerationDetected()
             }
