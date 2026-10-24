@@ -2,6 +2,7 @@ package jp.hisanet.charisafe.data.local
 
 import android.content.Context
 import android.util.Log
+import jp.hisanet.charisafe.data.location.LocationTracker
 import jp.hisanet.charisafe.domain.model.EventLog
 import jp.hisanet.charisafe.domain.model.EventType
 import jp.hisanet.charisafe.util.FileUtils
@@ -21,6 +22,7 @@ object EventLogStore {
         return File(dir, FILE_NAME)
     }
 
+    @Synchronized
     fun saveEvents(context: Context, logs: List<EventLog>) {
         try {
             val jsonArray = JSONArray()
@@ -51,6 +53,7 @@ object EventLogStore {
         }
     }
 
+    @Synchronized
     fun loadEvents(context: Context): List<EventLog> {
         val file = getFile(context)
         if (!file.exists() || file.length() == 0L) return emptyList()
@@ -74,8 +77,8 @@ object EventLogStore {
                     timestampMs = obj.optLong("timestampMs", System.currentTimeMillis()),
                     eventType = eventType,
                     speedKmh = obj.optDouble("speedKmh", 0.0).toFloat(),
-                    latitude = obj.optDouble("latitude", 35.681236),
-                    longitude = obj.optDouble("longitude", 139.767125),
+                    latitude = obj.optDouble("latitude", LocationTracker.lastValidLatitude),
+                    longitude = obj.optDouble("longitude", LocationTracker.lastValidLongitude),
                     decelerationSensitivity = obj.optDouble("decelerationSensitivity", 1.5).toFloat(),
                     approachSensitivity = obj.optDouble("approachSensitivity", 0.7).toFloat(),
                     collisionSensitivity = obj.optDouble("collisionSensitivity", 3.0).toFloat(),
