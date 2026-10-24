@@ -22,13 +22,16 @@ class EventLogRepositoryImpl(private val context: Context) : EventLogRepository 
     override val lastEvent: StateFlow<EventLog?> = _lastEvent.asStateFlow()
 
     init {
-        // 起動時に永続化ストレージからEventLogをロード
+        reload()
+    }
+
+    override fun reload() {
         val loaded = EventLogStore.loadEvents(context)
+        _eventLogs.value = loaded
         if (loaded.isNotEmpty()) {
-            _eventLogs.value = loaded
             _lastEvent.value = loaded.first()
-            Log.i(TAG, "Initialized EventLogRepository with ${loaded.size} persisted logs")
         }
+        Log.i(TAG, "Reloaded EventLogRepository from storage: ${loaded.size} logs found")
     }
 
     override fun addEvent(eventLog: EventLog) {
@@ -37,7 +40,6 @@ class EventLogRepositoryImpl(private val context: Context) : EventLogRepository 
         _eventLogs.value = currentList
         _lastEvent.value = eventLog
 
-        // 永続化ストレージに保存
         EventLogStore.saveEvents(context, currentList)
         Log.i(TAG, "Added and persisted new EventLog: ${eventLog.eventType} at speed ${eventLog.speedKmh}km/h")
     }

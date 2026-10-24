@@ -170,39 +170,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun loadExistingEvents() {
         viewModelScope.launch {
             try {
+                // 【重要】EventLogRepository をストレージから確実にリロード
+                eventLogRepository.reload()
+
                 val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir(getApplication())
                 val files = recordingsDir.listFiles { _, name -> name.startsWith("event_") && name.endsWith(".mp4") }
                     ?.sortedByDescending { it.lastModified() }
                     ?: emptyList()
                 
                 _savedEventFiles.value = files
-
-                if (eventLogRepository.eventLogs.value.isEmpty() && files.isNotEmpty()) {
-                    files.forEach { file ->
-                        val name = file.name
-                        val eventType = when {
-                            name.contains("_DECELERATION") -> EventType.DECELERATION
-                            name.contains("_APPROACH") -> EventType.APPROACH
-                            name.contains("_COLLISION") -> EventType.COLLISION
-                            name.contains("_SOUND") -> EventType.SOUND
-                            else -> EventType.APPROACH
-                        }
-                        val restoredLog = EventLog(
-                            timestampMs = file.lastModified(),
-                            eventType = eventType,
-                            speedKmh = 20.0f,
-                            latitude = 35.681236,
-                            longitude = 139.767125,
-                            decelerationSensitivity = 1.5f,
-                            approachSensitivity = 0.7f,
-                            collisionSensitivity = 3.0f,
-                            soundSensitivity = 85.0f,
-                            videoFilePath = file.absolutePath
-                        )
-                        eventLogRepository.addEvent(restoredLog)
-                    }
-                    Log.i(TAG, "Restored ${files.size} event logs from disk")
-                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load existing events", e)
             }
@@ -212,7 +188,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun startRecording() {
         val config = configRepository.getConfig()
 
-        // 【NEW】録画開始時にクリアフラグが有効な場合、過去のEventLogと保存動画をクリアする
         if (config.clearPreviousLogsAndVideosOnStart) {
             Log.w(TAG, "🧹 録画開始時データクリア有効: 過去のEventLogおよび保存動画を消去します")
             eventLogRepository.clearEvents()
