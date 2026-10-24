@@ -39,7 +39,6 @@ data class MainUiState(
     val savedEventFiles: List<File> = emptyList(),
     val selectedEventFile: File? = null,
     val eventLogs: List<EventLog> = emptyList(),
-    val selectedFilterType: EventType? = null, // フィルタ用
     val lastEvent: EventLog? = null,
     val eventCounts: EventCountSummary = EventCountSummary(),
     val sensitivity: EventSensitivity = EventSensitivity(),
@@ -62,7 +61,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _savedEventFiles = MutableStateFlow<List<File>>(emptyList())
     private val _selectedEventFile = MutableStateFlow<File?>(null)
-    private val _selectedFilterType = MutableStateFlow<EventType?>(null)
     private val _sensitivity = MutableStateFlow(EventSensitivity())
     private val _currentRideSummary = MutableStateFlow<RideSummary?>(null)
 
@@ -75,9 +73,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         },
         combine(eventLogRepository.lastEvent, _sensitivity, _currentRideSummary) { last, sens, summary ->
             Triple(last, sens, summary)
-        },
-        _selectedFilterType
-    ) { p1, p2, p3, filterType ->
+        }
+    ) { p1, p2, p3 ->
         val config = p1.first
         val state = p1.second
         val gpxPoint = p1.third
@@ -104,20 +101,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             soundCount = logs.count { it.eventType == EventType.SOUND }
         )
 
-        val filteredLogs = if (filterType != null) {
-            logs.filter { it.eventType == filterType }
-        } else {
-            logs
-        }
-
         MainUiState(
             config = config,
             status = status,
             isExporting = (state == RecordingState.EXPORTING),
             savedEventFiles = files,
             selectedEventFile = selected,
-            eventLogs = filteredLogs,
-            selectedFilterType = filterType,
+            eventLogs = logs,
             lastEvent = last,
             eventCounts = counts,
             sensitivity = sensitivity,
@@ -131,38 +121,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         loadExistingEvents()
-        // Priority1: 急減速検知時の自動イベント保存 ＆ EventLog記録
+        // Priority1: 急減速検知
         (gpxRepository as? GpxRepositoryImpl)?.onDecelerationDetected = {
             Log.w(TAG, "🚨 [Priority1] 急減速検知トリガー受領")
-            recordAutoEvent(EventType.DECELERATION)
+            recordEvent(EventType.DECELERATION)
         }
     }
 
-    fun recordAutoEvent(eventType: EventType, customVideoFile: File? = null) {
+    fun recordEvent(eventType: EventType, videoFile: File? = null) {
         viewModelScope.launch {
             val sens = _sensitivity.value
             val currentPoint = gpxRepository.currentGpxPoint.value
 
-            val eventFile = customVideoFile ?: saveManualEventUseCase.execute()
+            // ファイルが明示されていない場合は最新の保存済み動画を紐付け
+            val targetVideoFile = videoFile ?: saveManualEventUseCase.execute()
+
             val log = EventLog(
                 eventType = eventType,
                 speedKmh = currentPoint?.speedKmh ?: 0f,
-                latitude = currentPoint?.latitude ?: 35.681236,
-                longitude = currentPoint?.longitude ?: 139.767125,
+                latitude = currentPoint?.latitude ?: 0.0,
+                longitude = currentPoint?.longitude ?: 0.0,
                 decelerationSensitivity = sens.decelerationSensitivity,
                 approachSensitivity = sens.approachSensitivity,
                 collisionSensitivity = sens.collisionSensitivity,
                 soundSensitivity = sens.soundSensitivity,
-                videoFilePath = eventFile?.absolutePath
+                videoFilePath = targetVideoFile?.absolutePath
             )
             eventLogRepository.addEvent(log)
             loadExistingEvents()
-            Log.i(TAG, "Successfully recorded and logged event: ${log.eventType}")
+            Log.i(TAG, "Successfully recorded EventLog: ${eventType.displayName} at speed ${log.speedKmh}km/h")
         }
-    }
-
-    fun setEventFilter(eventType: EventType?) {
-        _selectedFilterType.value = if (_selectedFilterType.value == eventType) null else eventType
     }
 
     fun loadExistingEvents() {
@@ -193,15 +181,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun generateRideSummary() {
-        val logs = eventLogRepository.eventLogs.value
-        val totalDist = 5.2 // km
-        val durationSec = 1200L // 20分
-        val counts = EventCountSummary(
-            decelerationCount = logs.count { it.eventType == EventType.DECELERATION },
-            approachCount = logs.count { it.eventType == EventType.APPROACH },
-            collisionCount = logs.count { it.eventType == EventType.COLLISION },
-            soundCount = logs.count { it.eventType == EventType.SOUND }
-        )
+        val totalDist = 5.2
+        val durationSec = 1200L
+        val counts = uiState.value.eventCounts
 
         val summary = RideSummary(
             startTimeMs = System.currentTimeMillis() - durationSec * 1000L,
@@ -218,7 +200,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             decelerationPerHour = counts.decelerationCount / (durationSec / 3600.0f)
         )
         _currentRideSummary.value = summary
-        Log.i(TAG, "Generated RideSummary: distance=${totalDist}km, approach/km=${summary.approachPerKm}")
+        Log.i(TAG, "Generated RideSummary")
     }
 
     fun selectEventFile(file: File?) {
