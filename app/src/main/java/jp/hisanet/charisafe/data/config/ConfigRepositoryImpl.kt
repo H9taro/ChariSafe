@@ -25,6 +25,7 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
         private const val KEY_APPROACH_COOLDOWN = "key_approach_cooldown"
         private const val KEY_COLLISION_COOLDOWN = "key_collision_cooldown"
         private const val KEY_SOUND_COOLDOWN = "key_sound_cooldown"
+        private const val KEY_CLEAR_PREV_DATA = "key_clear_prev_data"
     }
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -50,6 +51,8 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
         val collisionCooldown = prefs.getLong(KEY_COLLISION_COOLDOWN, 0L)
         val soundCooldown = prefs.getLong(KEY_SOUND_COOLDOWN, 30L)
 
+        val clearPrevData = prefs.getBoolean(KEY_CLEAR_PREV_DATA, false)
+
         val resName = prefs.getString(KEY_RESOLUTION, VideoResolution.HD_720P.name) ?: VideoResolution.HD_720P.name
         val resolution = try {
             VideoResolution.valueOf(resName)
@@ -67,7 +70,8 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
             decelerationCooldownSec = decelCooldown,
             approachCooldownSec = approachCooldown,
             collisionCooldownSec = collisionCooldown,
-            soundCooldownSec = soundCooldown
+            soundCooldownSec = soundCooldown,
+            clearPreviousLogsAndVideosOnStart = clearPrevData
         )
     }
 
@@ -85,6 +89,7 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
                 .putLong(KEY_APPROACH_COOLDOWN, config.approachCooldownSec)
                 .putLong(KEY_COLLISION_COOLDOWN, config.collisionCooldownSec)
                 .putLong(KEY_SOUND_COOLDOWN, config.soundCooldownSec)
+                .putBoolean(KEY_CLEAR_PREV_DATA, config.clearPreviousLogsAndVideosOnStart)
         }
 
         _configState.value = config

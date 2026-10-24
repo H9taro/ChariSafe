@@ -153,8 +153,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 timestampMs = System.currentTimeMillis(),
                 eventType = eventType,
                 speedKmh = currentPoint?.speedKmh ?: 0f,
-                latitude = currentPoint?.latitude ?: 35.681236,
-                longitude = currentPoint?.longitude ?: 139.767125,
+                latitude = currentPoint?.latitude ?: jp.hisanet.charisafe.data.location.LocationTracker.lastValidLatitude,
+                longitude = currentPoint?.longitude ?: jp.hisanet.charisafe.data.location.LocationTracker.lastValidLongitude,
                 decelerationSensitivity = sens.decelerationSensitivity,
                 approachSensitivity = sens.approachSensitivity,
                 collisionSensitivity = sens.collisionSensitivity,
@@ -211,6 +211,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startRecording() {
         val config = configRepository.getConfig()
+
+        // 【NEW】録画開始時にクリアフラグが有効な場合、過去のEventLogと保存動画をクリアする
+        if (config.clearPreviousLogsAndVideosOnStart) {
+            Log.w(TAG, "🧹 録画開始時データクリア有効: 過去のEventLogおよび保存動画を消去します")
+            eventLogRepository.clearEvents()
+            try {
+                val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir(getApplication())
+                recordingsDir.listFiles { _, name -> name.startsWith("event_") && name.endsWith(".mp4") }
+                    ?.forEach { it.delete() }
+                loadExistingEvents()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to clear previous recordings on start", e)
+            }
+        }
+
         recordingRepository.startRecording(config)
         gpxRepository.startLogging(config.gpsIntervalSeconds)
         rideStartTimeMs = System.currentTimeMillis()
@@ -326,5 +341,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateSensitivity(sensitivity: EventSensitivity) {
         _sensitivity.value = sensitivity
+    }
+
+    fun updateClearPreviousData(clear: Boolean) {
+        val current = configRepository.getConfig()
+        configRepository.updateConfig(current.copy(clearPreviousLogsAndVideosOnStart = clear))
+        Log.i(TAG, "Updated clearPreviousLogsAndVideosOnStart to: $clear")
     }
 }
