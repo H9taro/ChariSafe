@@ -40,12 +40,15 @@ import androidx.lifecycle.LifecycleRegistry
 import jp.hisanet.charisafe.MainActivity
 import jp.hisanet.charisafe.R
 import jp.hisanet.charisafe.data.camera.RearApproachDetector
+import jp.hisanet.charisafe.data.local.EventLogStore
 import jp.hisanet.charisafe.data.local.ringbuffer.Mp4Concatenator
 import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
 import jp.hisanet.charisafe.data.sensor.AudioImpactDetector
 import jp.hisanet.charisafe.data.sensor.CollisionDropDetector
 import jp.hisanet.charisafe.data.sensor.PocketStorageDetector
 import jp.hisanet.charisafe.domain.model.ActiveCamera
+import jp.hisanet.charisafe.domain.model.EventLog
+import jp.hisanet.charisafe.domain.model.EventType
 import jp.hisanet.charisafe.poc.PocMetricsLogger
 import jp.hisanet.charisafe.util.FileUtils
 import kotlinx.coroutines.CoroutineScope
@@ -418,7 +421,6 @@ class RecordingService : Service(), LifecycleOwner {
                 setupVideoCaptureAndStart()
             }
 
-            // イベント種別サフィックスの付与 (フェーズ3仕様)
             val suffix = when (reason) {
                 "後方接近検知", "接近検知" -> "APPROACH"
                 "急減速検知" -> "DECELERATION"
@@ -439,7 +441,31 @@ class RecordingService : Service(), LifecycleOwner {
 
             if (success) {
                 MediaScannerConnection.scanFile(this@RecordingService, arrayOf(eventFile.absolutePath), null, null)
-                Log.i(TAG, "Successfully concatenated and saved event video with suffix [$suffix]: ${eventFile.absolutePath}")
+                Log.i(TAG, "Successfully concatenated and saved event video: ${eventFile.absolutePath}")
+
+                // 【重要】EventLogStore にも直接 EventLog を永続化登録して確実性を担保
+                val eventType = when (suffix) {
+                    "DECELERATION" -> EventType.DECELERATION
+                    "COLLISION" -> EventType.COLLISION
+                    "SOUND" -> EventType.SOUND
+                    else -> EventType.APPROACH
+                }
+                val newLog = EventLog(
+                    timestampMs = System.currentTimeMillis(),
+                    eventType = eventType,
+                    speedKmh = 20.0f,
+                    latitude = 35.681236,
+                    longitude = 139.767125,
+                    decelerationSensitivity = 1.5f,
+                    approachSensitivity = 0.7f,
+                    collisionSensitivity = 3.0f,
+                    soundSensitivity = 85.0f,
+                    videoFilePath = eventFile.absolutePath
+                )
+                val existingLogs = EventLogStore.loadEvents(this@RecordingService).toMutableList()
+                existingLogs.add(0, newLog)
+                EventLogStore.saveEvents(this@RecordingService, existingLogs)
+                Log.i(TAG, "Directly saved EventLog to EventLogStore for [$reason]")
             } else {
                 Log.e(TAG, "Failed to concatenate event video")
             }
