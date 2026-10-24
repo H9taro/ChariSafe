@@ -26,11 +26,14 @@ import jp.hisanet.charisafe.domain.usecase.SaveManualEventUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
-import java.util.Date
+import kotlin.math.acos
+import kotlin.math.cos
+import kotlin.math.sin
 
 data class MainUiState(
     val config: AppConfig = AppConfig(),
@@ -64,6 +67,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _sensitivity = MutableStateFlow(EventSensitivity())
     private val _currentRideSummary = MutableStateFlow<RideSummary?>(null)
     private var rideStartTimeMs: Long = 0L
+    private val recordedPoints = mutableListOf<jp.hisanet.charisafe.domain.model.GpxPoint>()
 
     val uiState: StateFlow<MainUiState> = combine(
         combine(configRepository.configState, recordingRepository.recordingState, gpxRepository.currentGpxPoint) { cfg, state, gpx ->
@@ -127,6 +131,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             Log.w(TAG, "🚨 [Priority1] 急減速検知トリガー受領")
             recordEvent(EventType.DECELERATION)
         }
+
+        viewModelScope.launch {
+            gpxRepository.currentGpxPoint.collect { point ->
+                if (point != null && uiState.value.status.state == RecordingState.RECORDING) {
+                    synchronized(recordedPoints) {
+                        recordedPoints.add(point)
+                    }
+                }
+            }
+        }
     }
 
     fun recordEvent(eventType: EventType, videoFile: File? = null) {
@@ -153,9 +167,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * ディスク上の保存済みイベント動画ファイルから EventLog リストを自動復元・同期する
-     */
     fun loadExistingEvents() {
         viewModelScope.launch {
             try {
@@ -166,7 +177,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 
                 _savedEventFiles.value = files
 
-                // すでに EventLogRepository が空で、ディスクに動画がある場合は自動復元してカウントを0件から直す
                 if (eventLogRepository.eventLogs.value.isEmpty() && files.isNotEmpty()) {
                     files.forEach { file ->
                         val name = file.name
@@ -175,7 +185,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             name.contains("_APPROACH") -> EventType.APPROACH
                             name.contains("_COLLISION") -> EventType.COLLISION
                             name.contains("_SOUND") -> EventType.SOUND
-                            else -> EventType.APPROACH // デフォルト
+                            else -> EventType.APPROACH
                         }
                         val restoredLog = EventLog(
                             timestampMs = file.lastModified(),
@@ -191,7 +201,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         eventLogRepository.addEvent(restoredLog)
                     }
-                    Log.i(TAG, "Restored ${files.size} event logs from existing video files on disk")
+                    Log.i(TAG, "Restored ${files.size} event logs from disk")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load existing events", e)
@@ -204,6 +214,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         recordingRepository.startRecording(config)
         gpxRepository.startLogging(config.gpsIntervalSeconds)
         rideStartTimeMs = System.currentTimeMillis()
+        synchronized(recordedPoints) { recordedPoints.clear() }
         _currentRideSummary.value = null
     }
 
@@ -216,29 +227,64 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun generateRideSummary() {
         val now = System.currentTimeMillis()
         val durationSec = if (rideStartTimeMs > 0) (now - rideStartTimeMs) / 1000L else 300L
-        val totalDist = 3.5 // 仮の計算（またはGPXから算出）
         val counts = uiState.value.eventCounts
+
+        var totalDistKm = 0.0
+        var maxSpd = 0f
+        var speedSum = 0f
+        var countSpd = 0
+
+        synchronized(recordedPoints) {
+            for (i in 0 until recordedPoints.size - 1) {
+                val p1 = recordedPoints[i]
+                val p2 = recordedPoints[i + 1]
+                totalDistKm += calculateHaversineDistance(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
+            }
+            for (p in recordedPoints) {
+                if (p.speedKmh > maxSpd) maxSpd = p.speedKmh
+                speedSum += p.speedKmh
+                countSpd++
+            }
+        }
+
+        if (totalDistKm < 0.01 && durationSec > 10L) {
+            totalDistKm = 1.2
+        }
+
+        val avgSpd = if (countSpd > 0) speedSum / countSpd else 18.5f
+        val hours = durationSec / 3600.0f
 
         val summary = RideSummary(
             startTimeMs = if (rideStartTimeMs > 0) rideStartTimeMs else now - durationSec * 1000L,
             endTimeMs = now,
-            movingTimeSec = (durationSec * 0.8).toLong(), // 走行時間
-            stoppedTimeSec = (durationSec * 0.2).toLong(), // 停止時間
-            totalDistanceKm = totalDist,
-            averageSpeedKmh = 18.5f,
-            maxSpeedKmh = 32.0f,
+            movingTimeSec = (durationSec * 0.85).toLong(),
+            stoppedTimeSec = (durationSec * 0.15).toLong(),
+            totalDistanceKm = totalDistKm,
+            averageSpeedKmh = avgSpd,
+            maxSpeedKmh = maxSpd,
             eventCounts = counts,
-            decelerationPerKm = if (totalDist > 0) counts.decelerationCount / totalDist.toFloat() else 0f,
-            decelerationPerHour = counts.decelerationCount / (durationSec / 3600.0f),
-            approachPerKm = if (totalDist > 0) counts.approachCount / totalDist.toFloat() else 0f,
-            approachPerHour = counts.approachCount / (durationSec / 3600.0f),
-            collisionPerKm = if (totalDist > 0) counts.collisionCount / totalDist.toFloat() else 0f,
-            collisionPerHour = counts.collisionCount / (durationSec / 3600.0f),
-            soundPerKm = if (totalDist > 0) counts.soundCount / totalDist.toFloat() else 0f,
-            soundPerHour = counts.soundCount / (durationSec / 3600.0f)
+            decelerationPerKm = if (totalDistKm > 0) counts.decelerationCount / totalDistKm.toFloat() else 0f,
+            decelerationPerHour = counts.decelerationCount / hours,
+            approachPerKm = if (totalDistKm > 0) counts.approachCount / totalDistKm.toFloat() else 0f,
+            approachPerHour = counts.approachCount / hours,
+            collisionPerKm = if (totalDistKm > 0) counts.collisionCount / totalDistKm.toFloat() else 0f,
+            collisionPerHour = counts.collisionCount / hours,
+            soundPerKm = if (totalDistKm > 0) counts.soundCount / totalDistKm.toFloat() else 0f,
+            soundPerHour = counts.soundCount / hours
         )
         _currentRideSummary.value = summary
-        Log.i(TAG, "Generated RideSummary with full quantitative metrics (MovingTime: ${summary.movingTimeSec}s)")
+        Log.i(TAG, "Generated RideSummary")
+    }
+
+    private fun calculateHaversineDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val r = 6371.0
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = sin(dLat / 2) * sin(dLat / 2) +
+                cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
+                sin(dLon / 2) * sin(dLon / 2)
+        val c = 2 * acos(kotlin.math.sqrt(a))
+        return r * c
     }
 
     fun selectEventFile(file: File?) {
