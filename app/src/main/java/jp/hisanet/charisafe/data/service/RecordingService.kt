@@ -147,13 +147,13 @@ class RecordingService : Service(), LifecycleOwner {
         }
 
         collisionDropDetector = CollisionDropDetector(this) {
-            Log.w(TAG, "💥 衝撃検知トリガー受領 -> 警告音＋自動イベント保存を実行します")
-            triggerAutoEventWithAlert("衝撃")
+            Log.w(TAG, "💥 衝突・落下検知トリガー受領 -> 警告音＋自動イベント保存を実行します")
+            triggerAutoEventWithAlert("衝突・落下検知")
         }
 
-        audioImpactDetector = AudioImpactDetector({ 85.0f }) {
-            Log.w(TAG, "💥 [AudioImpact] 音量検知トリガー受領 -> 警告音＋自動イベント保存を実行します")
-            triggerAutoEventWithAlert("音量")
+        audioImpactDetector = AudioImpactDetector {
+            Log.w(TAG, "💥 [AudioImpact] 大きな音(衝突音)検知トリガー受領 -> 警告音＋自動イベント保存を実行します")
+            triggerAutoEventWithAlert("大きな音(衝突音)検知")
         }
     }
 
@@ -318,7 +318,7 @@ class RecordingService : Service(), LifecycleOwner {
                 .apply {
                     setAnalyzer(analysisExecutor, RearApproachDetector {
                         Log.w(TAG, "🚨 [Priority2] 接近検知発火 -> 警告音＋自動イベント保存を実行します")
-                        triggerAutoEventWithAlert("接近")
+                        triggerAutoEventWithAlert("接近検知")
                     })
                 }
 
@@ -393,6 +393,7 @@ class RecordingService : Service(), LifecycleOwner {
             val currentFilePath = _serviceState.value.currentFile
             val currentFile = File(currentFilePath)
 
+            // 【重要】LocationTrackerから最新の実測位置（生GPS座標）を取得
             val lat = LocationTracker.lastValidLatitude
             val lon = LocationTracker.lastValidLongitude
 
@@ -426,10 +427,10 @@ class RecordingService : Service(), LifecycleOwner {
             }
 
             val suffix = when (reason) {
-                "後方接近検知", "接近" -> "APPROACH"
-                "急減速検知", "減速" -> "DECELERATION"
-                "衝突・落下検知", "衝撃" -> "COLLISION"
-                "大きな音(衝突音)検知", "音量" -> "SOUND"
+                "後方接近検知", "接近検知" -> "APPROACH"
+                "急減速検知" -> "DECELERATION"
+                "衝突・落下検知" -> "COLLISION"
+                "大きな音(衝突音)検知" -> "SOUND"
                 else -> "APPROACH"
             }
 
@@ -457,8 +458,8 @@ class RecordingService : Service(), LifecycleOwner {
                     timestampMs = System.currentTimeMillis(),
                     eventType = eventType,
                     speedKmh = 20.0f,
-                    latitude = lat,
-                    longitude = lon,
+                    latitude = lat,  // 正確な実測緯度
+                    longitude = lon, // 正確な実測経度
                     decelerationSensitivity = 1.5f,
                     approachSensitivity = 0.7f,
                     collisionSensitivity = 3.0f,
