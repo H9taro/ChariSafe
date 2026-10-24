@@ -128,7 +128,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         loadExistingEvents()
         val gpxImpl = gpxRepository as? GpxRepositoryImpl
         gpxImpl?.onDecelerationDetected = {
-            Log.w(TAG, "🚨 [Priority1] 急減速検知トリガー受領")
+            Log.w(TAG, "🚨 [Priority1] 減速検知トリガー受領")
             recordEvent(EventType.DECELERATION)
         }
 
@@ -170,7 +170,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun loadExistingEvents() {
         viewModelScope.launch {
             try {
-                // 【重要】EventLogRepository をストレージから確実にリロード
                 eventLogRepository.reload()
 
                 val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir(getApplication())
@@ -228,7 +227,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             for (i in 0 until recordedPoints.size - 1) {
                 val p1 = recordedPoints[i]
                 val p2 = recordedPoints[i + 1]
-                totalDistKm += calculateHaversineDistance(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
+                val dist = calculateHaversineDistance(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
+                // 異常なGPSジャンプ（1ステップで1km以上など、自転車移動として不自然な数値）を除外して堅牢化
+                if (dist < 1.0) {
+                    totalDistKm += dist
+                }
             }
             for (p in recordedPoints) {
                 if (p.speedKmh > maxSpd) maxSpd = p.speedKmh
@@ -237,11 +240,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        if (totalDistKm < 0.01 && durationSec > 10L) {
-            totalDistKm = 1.2
+        // 移動していない（0km）場合は厳密に0.0とする
+        if (totalDistKm < 0.005) {
+            totalDistKm = 0.0
         }
 
-        val avgSpd = if (countSpd > 0) speedSum / countSpd else 18.5f
+        val avgSpd = if (countSpd > 0) speedSum / countSpd else 0f
         val hours = durationSec / 3600.0f
 
         val summary = RideSummary(
@@ -253,6 +257,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             averageSpeedKmh = avgSpd,
             maxSpeedKmh = maxSpd,
             eventCounts = counts,
+            // 順序統一: 減速, 接近, 衝撃, 音量
             decelerationPerKm = if (totalDistKm > 0) counts.decelerationCount / totalDistKm.toFloat() else 0f,
             decelerationPerHour = counts.decelerationCount / hours,
             approachPerKm = if (totalDistKm > 0) counts.approachCount / totalDistKm.toFloat() else 0f,
@@ -263,7 +268,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             soundPerHour = counts.soundCount / hours
         )
         _currentRideSummary.value = summary
-        Log.i(TAG, "Generated RideSummary")
+        Log.i(TAG, "Generated RideSummary: dist=${totalDistKm}km, movingTime=${summary.movingTimeSec}s")
     }
 
     private fun calculateHaversineDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {

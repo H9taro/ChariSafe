@@ -4,7 +4,7 @@ import android.util.Log
 import jp.hisanet.charisafe.domain.model.GpxPoint
 
 class SpeedDecelerationDetector(
-    private val getTargetSeconds: () -> Float, // ユーザー設定の減速完了までの秒数 (例: 1.5秒)
+    private val getTargetSeconds: () -> Float, // ユーザー設定の減速閾値までの秒数 (左=0.5s敏感, 右=3.0s鈍感)
     private val onDecelerationDetected: () -> Unit
 ) {
     companion object {
@@ -20,7 +20,6 @@ class SpeedDecelerationDetector(
         val now = point.timestampMs
         speedHistory.add(point)
 
-        // 過去5秒間の履歴を保持
         speedHistory.removeAll { now - it.timestampMs > 5000L }
 
         if (speedHistory.size < 2) return
@@ -34,9 +33,9 @@ class SpeedDecelerationDetector(
         if (timeDeltaMs in 1L..targetDurationMs) {
             val speedDrop = oldest.speedKmh - latest.speedKmh
 
-            if (speedDrop >= MIN_SPEED_DROP_KMH && now - lastTriggerTimeMs > 30000L) { // クールダウン30秒
+            if (speedDrop >= MIN_SPEED_DROP_KMH && now - lastTriggerTimeMs > 30000L) {
                 lastTriggerTimeMs = now
-                Log.w(TAG, "🚨 急減速検知 (秒数指定: ${targetDurationMs}ms)! Drop: ${speedDrop}km/h in ${timeDeltaMs}ms")
+                Log.w(TAG, "🚨 [減速検知] 設定秒数(${targetDurationMs}ms)以内の急低下! Drop: ${speedDrop}km/h in ${timeDeltaMs}ms")
                 speedHistory.clear()
                 onDecelerationDetected()
             }
