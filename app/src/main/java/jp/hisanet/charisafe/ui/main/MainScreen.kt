@@ -56,9 +56,11 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import jp.hisanet.charisafe.data.location.LocationTracker
 import jp.hisanet.charisafe.domain.model.ActiveCamera
 import jp.hisanet.charisafe.domain.model.EventType
 import jp.hisanet.charisafe.domain.model.RecordingState
+import jp.hisanet.charisafe.util.FileUtils
 import kotlinx.coroutines.delay
 import java.io.File
 import java.text.SimpleDateFormat
@@ -79,7 +81,7 @@ fun MainScreen(
     var hasLocationPermission by remember { mutableStateOf(checkLocationPermission(context)) }
 
     // アコーディオン開閉状態
-    var isHistoryExpanded by remember { mutableStateOf(true) }
+    var isHistoryExpanded by remember { mutableStateOf(false) }
     var isSummaryExpanded by remember { mutableStateOf(false) }
     var isSettingsExpanded by remember { mutableStateOf(false) }
 
@@ -155,14 +157,31 @@ fun MainScreen(
     }
 
     val shareRoute = {
-        val lat = 35.681236
-        val lon = 139.767125
-        val mapsUrl = "https://maps.google.com/?q=$lat,$lon"
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, "「現在ChariSafeで走行中です！」\n現在地: $mapsUrl")
+        try {
+            val gpxDir = FileUtils.getGpxDir(context)
+            val latestGpxFile = gpxDir.listFiles { _, name -> name.startsWith("ride_") && name.endsWith(".gpx") }
+                ?.sortedByDescending { it.lastModified() }
+                ?.firstOrNull()
+
+            if (latestGpxFile != null && latestGpxFile.exists() && latestGpxFile.length() > 0) {
+                val uri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    latestGpxFile
+                )
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "*/*" // GPXファイルインテント
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(intent, "走行経路(GPX)をGoogle Maps等に共有"))
+            } else {
+                Toast.makeText(context, "共有できるGPXログファイルが見つかりません", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(context, "GPX共有エラー: ${e.message}", Toast.LENGTH_SHORT).show()
         }
-        context.startActivity(Intent.createChooser(intent, "走行経路を共有"))
     }
 
     LaunchedEffect(Unit) {
@@ -222,7 +241,7 @@ fun MainScreen(
         // 【常時表示エリア】
         // ==========================================
 
-        // 1. 現在速度 (タイトルなし)
+        // 1. 現在速度
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
@@ -264,14 +283,13 @@ fun MainScreen(
             Spacer(modifier = Modifier.height(12.dp))
         }
 
-        // 3. 全4種類のイベント感度スライダー (タイトルなし・表示順統一: 急減速, 接近検知, 衝突・落下, 大音量検知)
+        // 3. イベント感度スライダー
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                // 急減速 (秒数指定)
-                Text(text = "急減速検出時間: ${String.format(Locale.US, "%.1f", uiState.sensitivity.decelerationSensitivity)} 秒", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                Text(text = "減速感度: ${String.format(Locale.US, "%.1f", uiState.sensitivity.decelerationSensitivity)} 秒", fontSize = 11.sp, fontWeight = FontWeight.Medium)
                 Slider(
                     value = uiState.sensitivity.decelerationSensitivity,
                     onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(decelerationSensitivity = it)) },
@@ -279,8 +297,7 @@ fun MainScreen(
                     steps = 25
                 )
 
-                // 接近検知 (%)
-                Text(text = "接近検知感度: ${(uiState.sensitivity.approachSensitivity * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                Text(text = "接近感度: ${(uiState.sensitivity.approachSensitivity * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Medium)
                 Slider(
                     value = uiState.sensitivity.approachSensitivity,
                     onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(approachSensitivity = it)) },
@@ -289,7 +306,7 @@ fun MainScreen(
                 )
 
                 // 衝突・落下 (G)
-                Text(text = "衝突・落下感度: ${String.format(Locale.US, "%.1f", uiState.sensitivity.collisionSensitivity)} G", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                Text(text = "衝撃感度: ${String.format(Locale.US, "%.1f", uiState.sensitivity.collisionSensitivity)} G", fontSize = 11.sp, fontWeight = FontWeight.Medium)
                 Slider(
                     value = uiState.sensitivity.collisionSensitivity,
                     onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(collisionSensitivity = it)) },
@@ -298,7 +315,7 @@ fun MainScreen(
                 )
 
                 // 大音量検知 (dB)
-                Text(text = "大音量検知感度: ${uiState.sensitivity.soundSensitivity.toInt()} dB", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                Text(text = "音量感度: ${uiState.sensitivity.soundSensitivity.toInt()} dB", fontSize = 11.sp, fontWeight = FontWeight.Medium)
                 Slider(
                     value = uiState.sensitivity.soundSensitivity,
                     onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(soundSensitivity = it)) },
@@ -376,12 +393,7 @@ fun MainScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(text = "📊 イベントフィルタ", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
-                    if (selectedFilterType != null) {
-                        OutlinedButton(onClick = { selectedFilterType = null }, modifier = Modifier.height(28.dp)) {
-                            Text("すべて表示", fontSize = 10.sp)
-                        }
-                    }
+                    Text(text = "イベントフィルタ", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
@@ -389,11 +401,10 @@ fun MainScreen(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     EventFilterBadge("全(${uiState.eventLogs.size})", isSelected = selectedFilterType == null) { selectedFilterType = null }
-                    // 順序統一: 急減速, 接近検知, 衝突・落下, 大音量検知
-                    EventFilterBadge("⚠ 急減速(${uiState.eventCounts.decelerationCount})", isSelected = selectedFilterType == EventType.DECELERATION) { selectedFilterType = EventType.DECELERATION }
-                    EventFilterBadge("🚗 接近検知(${uiState.eventCounts.approachCount})", isSelected = selectedFilterType == EventType.APPROACH) { selectedFilterType = EventType.APPROACH }
-                    EventFilterBadge("💥 衝突・落下(${uiState.eventCounts.collisionCount})", isSelected = selectedFilterType == EventType.COLLISION) { selectedFilterType = EventType.COLLISION }
-                    EventFilterBadge("🔊 大音量検知(${uiState.eventCounts.soundCount})", isSelected = selectedFilterType == EventType.SOUND) { selectedFilterType = EventType.SOUND }
+                    EventFilterBadge("⚠ 減速(${uiState.eventCounts.decelerationCount})", isSelected = selectedFilterType == EventType.DECELERATION) { selectedFilterType = EventType.DECELERATION }
+                    EventFilterBadge("🚗 接近(${uiState.eventCounts.approachCount})", isSelected = selectedFilterType == EventType.APPROACH) { selectedFilterType = EventType.APPROACH }
+                    EventFilterBadge("💥 衝撃(${uiState.eventCounts.collisionCount})", isSelected = selectedFilterType == EventType.COLLISION) { selectedFilterType = EventType.COLLISION }
+                    EventFilterBadge("🔊 音量(${uiState.eventCounts.soundCount})", isSelected = selectedFilterType == EventType.SOUND) { selectedFilterType = EventType.SOUND }
                 }
             }
         }
@@ -406,7 +417,6 @@ fun MainScreen(
 
         val filteredLogs = if (selectedFilterType == null) uiState.eventLogs else uiState.eventLogs.filter { it.eventType == selectedFilterType }
 
-        // 📁 イベント履歴 (動画再生・Map共有統合・発生時感度パラメータ表示)
         AccordionSection(title = "📁 イベント履歴 (${filteredLogs.size}件)", expanded = isHistoryExpanded, onToggle = { isHistoryExpanded = !isHistoryExpanded }) {
             if (filteredLogs.isEmpty()) {
                 Text("該当するイベント履歴はありません", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(8.dp))
@@ -417,12 +427,12 @@ fun MainScreen(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
-                            Text(text = "${log.eventType.emoji} ${log.eventType.displayName}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text(text = "${log.eventType.emoji} ${log.eventType.displayName}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             Text(text = "時刻: ${SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US).format(Date(log.timestampMs))}", fontSize = 11.sp, color = Color.Gray)
                             Text(text = "速度: ${log.speedKmh} km/h", fontSize = 11.sp)
                             // 【NEW】イベント発生時の感度設定値を表示
                             Text(
-                                text = "感度 ➔ 急減速: ${log.decelerationSensitivity}秒, 接近: ${(log.approachSensitivity * 100).toInt()}%, 衝突: ${log.collisionSensitivity}G, 音量: ${log.soundSensitivity.toInt()}dB",
+                                text = "感度 ➔ 減速: ${log.decelerationSensitivity}秒, 接近: ${(log.approachSensitivity * 100).toInt()}%, 衝撃: ${log.collisionSensitivity}G, 音量: ${log.soundSensitivity.toInt()}dB",
                                 fontSize = 10.sp,
                                 color = Color.DarkGray
                             )
@@ -467,12 +477,12 @@ fun MainScreen(
                     Text(text = "総距離: ${String.format(Locale.US, "%.2f", summary.totalDistanceKm)} km", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Text(text = "平均速度: ${String.format(Locale.US, "%.1f", summary.averageSpeedKmh)} km/h (最高: ${summary.maxSpeedKmh} km/h)", fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text(text = "【危険度定量的指標 (順序統一)】", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                    // 順序統一: 急減速, 接近検知, 衝突・落下, 大音量検知
-                    Text(text = "⚠ 急減速: ${summary.eventCounts.decelerationCount}件 (${String.format(Locale.US, "%.2f", summary.decelerationPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.decelerationPerHour)}件/h)", fontSize = 11.sp)
-                    Text(text = "🚗 接近検知: ${summary.eventCounts.approachCount}件 (${String.format(Locale.US, "%.2f", summary.approachPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.approachPerHour)}件/h)", fontSize = 11.sp)
-                    Text(text = "💥 衝突・落下: ${summary.eventCounts.collisionCount}件 (${String.format(Locale.US, "%.2f", summary.collisionPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.collisionPerHour)}件/h)", fontSize = 11.sp)
-                    Text(text = "🔊 大音量検知: ${summary.eventCounts.soundCount}件 (${String.format(Locale.US, "%.2f", summary.soundPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.soundPerHour)}件/h)", fontSize = 11.sp)
+                    Text(text = "【危険度定量的指標】", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                    // 順序統一: 減速, 接近, 衝撃, 音量
+                    Text(text = "⚠ 減速: ${summary.eventCounts.decelerationCount}件 (${String.format(Locale.US, "%.2f", summary.decelerationPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.decelerationPerHour)}件/h)", fontSize = 11.sp)
+                    Text(text = "🚗 接近: ${summary.eventCounts.approachCount}件 (${String.format(Locale.US, "%.2f", summary.approachPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.approachPerHour)}件/h)", fontSize = 11.sp)
+                    Text(text = "💥 衝撃: ${summary.eventCounts.collisionCount}件 (${String.format(Locale.US, "%.2f", summary.collisionPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.collisionPerHour)}件/h)", fontSize = 11.sp)
+                    Text(text = "🔊 音量: ${summary.eventCounts.soundCount}件 (${String.format(Locale.US, "%.2f", summary.soundPerKm)}件/km | ${String.format(Locale.US, "%.1f", summary.soundPerHour)}件/h)", fontSize = 11.sp)
 
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(
@@ -480,13 +490,12 @@ fun MainScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
                         modifier = Modifier.fillMaxWidth().height(36.dp)
                     ) {
-                        Text("🌐 走行経路を共有 (GPX)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("🌐 走行経路を共有", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
 
-        // ⚙️ 録画設定 (文言整理・録画中のクリア設定ロック)
         AccordionSection(title = "⚙️ 録画設定", expanded = isSettingsExpanded, onToggle = { isSettingsExpanded = !isSettingsExpanded }) {
             Column(modifier = Modifier.padding(8.dp)) {
                 DropdownSettingItem(
