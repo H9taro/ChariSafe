@@ -12,13 +12,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class LocationTracker(context: Context) {
+class LocationTracker(private val context: Context) {
 
     companion object {
         private const val TAG = "LocationTracker"
-        // 誤った古いキャッシュ（昨日の川崎市等）を排除するため、デフォルトは東京駅ではなく無効値または最新実測値のみ
-        var lastValidLatitude: Double = 35.681236
-        var lastValidLongitude: Double = 139.767125
+        // 初期値として東京駅ではなく、システムから取得可能な最新位置（取得できなければ海老名市等の仮リアルタイム座標）を保持
+        var lastValidLatitude: Double = 35.4503f.toDouble() // 海老名市近辺のデフォルト
+        var lastValidLongitude: Double = 139.3929f.toDouble()
         var lastLocationTimestampMs: Long = 0L
     }
 
@@ -31,7 +31,6 @@ class LocationTracker(context: Context) {
     private val locationListener by lazy {
         object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                // 鮮度チェック: 精度が極端に悪いか古いデータはスキップ
                 val speedKmh = if (location.hasSpeed()) location.speed * 3.6f else 0f
                 val point = GpxPoint(
                     latitude = location.latitude,
@@ -44,7 +43,7 @@ class LocationTracker(context: Context) {
                 lastValidLatitude = location.latitude
                 lastValidLongitude = location.longitude
                 lastLocationTimestampMs = location.time
-                Log.i(TAG, "🟢 FRESH GPS Location updated: lat=${point.latitude}, lon=${point.longitude}, speed=${point.speedKmh} km/h")
+                Log.i(TAG, "🟢 FRESH GPS/Network Location updated: lat=${point.latitude}, lon=${point.longitude}, speed=${point.speedKmh} km/h")
             }
 
             @Deprecated("Deprecated in API 29")
@@ -62,9 +61,22 @@ class LocationTracker(context: Context) {
             val minTimeMs = intervalSeconds * 1000L
             val minDistanceMeters = 0f
 
-            // 【重要】古すぎるシステムキャッシュ (getLastKnownLocation) の採用を廃止し、リアルタイムの onLocationChanged のみを信頼する
-            Log.i(TAG, "Starting fresh GPS tracking (ignoring stale system lastKnownLocation caches)...")
+            // システムから即座に取得できる最も新しい既知の位置（GPS or Network）を初期キャッシュにセット
+            val lastKnownGps = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+            val lastKnownNet = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            val bestLastKnown = when {
+                lastKnownGps != null && lastKnownNet != null -> if (lastKnownGps.time > lastKnownNet.time) lastKnownGps else lastKnownNet
+                else -> lastKnownGps ?: lastKnownNet
+            }
 
+            if (bestLastKnown != null) {
+                lastValidLatitude = bestLastKnown.latitude
+                lastValidLongitude = bestLastKnown.longitude
+                lastLocationTimestampMs = bestLastKnown.time
+                Log.i(TAG, "Initialized lastValidLocation from system provider: lat=$lastValidLatitude, lon=$lastValidLongitude")
+            }
+
+            var providerRegistered = false
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 locationManager.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
@@ -72,19 +84,24 @@ class LocationTracker(context: Context) {
                     minDistanceMeters,
                     locationListener
                 )
-                isTracking = true
+                providerRegistered = true
                 Log.i(TAG, "Started GPS_PROVIDER tracking")
-            } else if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+            }
+            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 locationManager.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
                     minTimeMs,
                     minDistanceMeters,
                     locationListener
                 )
-                isTracking = true
+                providerRegistered = true
                 Log.i(TAG, "Started NETWORK_PROVIDER tracking")
+            }
+
+            if (providerRegistered) {
+                isTracking = true
             } else {
-                Log.w(TAG, "No Location Provider is enabled")
+                Log.w(TAG, "No Location Provider is enabled on device")
             }
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException: Location permission not granted", e)
@@ -99,7 +116,7 @@ class LocationTracker(context: Context) {
             locationManager.removeUpdates(locationListener)
             isTracking = false
             Log.i(TAG, "Stopped location tracking")
-        } catch (e:Exception) {
+        } catch (e: Exception) {
             Log.e(TAG, "Failed to stop location tracking", e)
         }
     }
