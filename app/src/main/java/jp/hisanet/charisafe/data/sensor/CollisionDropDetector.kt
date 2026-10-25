@@ -6,12 +6,16 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
+import jp.hisanet.charisafe.data.debug.CollisionDebugLogger
 import kotlin.math.sqrt
 
 class CollisionDropDetector(
     context: Context,
+    private val collisionDebugLogger: CollisionDebugLogger? = null,
     private val onCollisionOrDropDetected: () -> Unit
 ) : SensorEventListener {
+
+    constructor(context: Context, onCollisionOrDropDetected: () -> Unit) : this(context, null, onCollisionOrDropDetected)
 
     companion object {
         private const val TAG = "CollisionDropDetector"
@@ -51,7 +55,15 @@ class CollisionDropDetector(
             val gForce = acceleration / GRAVITY_G
 
             val now = System.currentTimeMillis()
-            if (gForce >= SHOCK_THRESHOLD_G && now - lastTriggerTime > 10000L) {
+            val triggered = gForce >= SHOCK_THRESHOLD_G && now - lastTriggerTime > 10000L
+
+            collisionDebugLogger?.log(
+                gForce = gForce,
+                shockThresholdG = SHOCK_THRESHOLD_G,
+                triggered = triggered
+            )
+
+            if (triggered) {
                 lastTriggerTime = now
                 Log.w(TAG, "💥 衝突・落下検知! G-Force: ${String.format(java.util.Locale.US, "%.2f", gForce)}G")
                 onCollisionOrDropDetected()

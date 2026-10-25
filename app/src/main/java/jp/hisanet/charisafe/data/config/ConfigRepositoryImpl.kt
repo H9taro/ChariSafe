@@ -26,6 +26,10 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
         private const val KEY_COLLISION_COOLDOWN = "key_collision_cooldown"
         private const val KEY_SOUND_COOLDOWN = "key_sound_cooldown"
         private const val KEY_CLEAR_PREV_DATA = "key_clear_prev_data"
+        private const val KEY_APPROACH_CSV_ENABLED = "key_approach_csv_enabled"
+        private const val KEY_AUDIO_CSV_ENABLED = "key_audio_csv_enabled"
+        private const val KEY_DECELERATION_CSV_ENABLED = "key_deceleration_csv_enabled"
+        private const val KEY_COLLISION_CSV_ENABLED = "key_collision_csv_enabled"
     }
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -52,6 +56,10 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
         val soundCooldown = prefs.getLong(KEY_SOUND_COOLDOWN, 30L)
 
         val clearPrevData = prefs.getBoolean(KEY_CLEAR_PREV_DATA, false)
+        val approachCsv = prefs.getBoolean(KEY_APPROACH_CSV_ENABLED, false)
+        val audioCsv = prefs.getBoolean(KEY_AUDIO_CSV_ENABLED, false)
+        val decelCsv = prefs.getBoolean(KEY_DECELERATION_CSV_ENABLED, false)
+        val collisionCsv = prefs.getBoolean(KEY_COLLISION_CSV_ENABLED, false)
 
         val resName = prefs.getString(KEY_RESOLUTION, VideoResolution.HD_720P.name) ?: VideoResolution.HD_720P.name
         val resolution = try {
@@ -71,7 +79,11 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
             approachCooldownSec = approachCooldown,
             collisionCooldownSec = collisionCooldown,
             soundCooldownSec = soundCooldown,
-            clearPreviousLogsAndVideosOnStart = clearPrevData
+            clearPreviousLogsAndVideosOnStart = clearPrevData,
+            approachCsvEnabled = approachCsv,
+            audioCsvEnabled = audioCsv,
+            decelerationCsvEnabled = decelCsv,
+            collisionCsvEnabled = collisionCsv
         )
     }
 
@@ -90,6 +102,10 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
                 .putLong(KEY_COLLISION_COOLDOWN, config.collisionCooldownSec)
                 .putLong(KEY_SOUND_COOLDOWN, config.soundCooldownSec)
                 .putBoolean(KEY_CLEAR_PREV_DATA, config.clearPreviousLogsAndVideosOnStart)
+                .putBoolean(KEY_APPROACH_CSV_ENABLED, config.approachCsvEnabled)
+                .putBoolean(KEY_AUDIO_CSV_ENABLED, config.audioCsvEnabled)
+                .putBoolean(KEY_DECELERATION_CSV_ENABLED, config.decelerationCsvEnabled)
+                .putBoolean(KEY_COLLISION_CSV_ENABLED, config.collisionCsvEnabled)
         }
 
         _configState.value = config

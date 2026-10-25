@@ -75,3 +75,28 @@ Android 11+ スコープストレージに対応し、PC接続やファイルマ
   - `/storage/emulated/0/Documents/ChariSafe/gpx/`
 - **バッテリー・温度 CSVログ保存先**:
   - `/storage/emulated/0/Documents/ChariSafe/logs/`
+
+---
+
+## 5. デバッグログシステム (Debug Logging System)
+
+Phase 3 チューニングおよび実走検証のための高精度デバッグ機能。センサー/検知器ごとの内部メトリクスを CSV 形式でアプリ専用ストレージに永続化し、開発者向け設定から ZIP 共有や自動削除が可能。
+
+### 5.1 保存パスとファイル命名規則
+- **保存ディレクトリ**:
+  - `Android/data/jp.hisanet.charisafe/files/debug/`
+- **CSVファイル群 (日付別ローテーション / UTF-8)**:
+  - 接近検知: `approach_debug_YYYYMMDD.csv`
+  - 音量検知: `audio_debug_YYYYMMDD.csv`
+  - 減速検知: `deceleration_debug_YYYYMMDD.csv`
+  - 衝撃検知: `collision_debug_YYYYMMDD.csv`
+
+### 5.2 自動クリーンアップ & ストレージ対策
+- **保持期間**: 最新 30 日分のみ保持。
+- **自動削除**: アプリ起動時に `DebugLogCleanupManager` が 31日以上前の CSV ファイルを自動削除し、ストレージ肥大化を防止。
+
+### 5.3 開発者向け操作手順 (UI)
+1. アプリの **⚙️ 録画設定** 内にある **【開発者向けデバッグ】** セクションを開く。
+2. 取得したいセンサー/検知器のチェックボックス（接近検知、音量検知、減速検知、衝撃検知）を有効にする。
+3. **📤 ログ共有 (ZIP)** ボタンをタップすると、`debug/` フォルダ内のすべての CSV が ZIP 圧縮され、Android 共有シート（メール、Googleドライブ、Slack等）が起動。
+4. **🗑️ ログ削除** ボタンをタップして確認ダイアログで承認すると、デバッグログを全削除可能。

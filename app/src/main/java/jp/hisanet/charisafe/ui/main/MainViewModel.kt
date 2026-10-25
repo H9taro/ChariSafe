@@ -8,6 +8,7 @@ import jp.hisanet.charisafe.data.config.ConfigRepositoryImpl
 import jp.hisanet.charisafe.data.repository.EventLogRepositoryImpl
 import jp.hisanet.charisafe.data.repository.GpxRepositoryImpl
 import jp.hisanet.charisafe.data.repository.RecordingRepositoryImpl
+import jp.hisanet.charisafe.data.debug.DecelerationDebugLogger
 import jp.hisanet.charisafe.domain.model.ActiveCamera
 import jp.hisanet.charisafe.domain.model.AppConfig
 import jp.hisanet.charisafe.domain.model.EventCountSummary
@@ -55,7 +56,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val configRepository: ConfigRepository = ConfigRepositoryImpl(application)
     private val recordingRepository: RecordingRepository = RecordingRepositoryImpl(application)
-    private val gpxRepository: GpxRepository = GpxRepositoryImpl(application)
+    private val decelerationDebugLogger = DecelerationDebugLogger(application)
+    private val gpxRepository: GpxRepository = GpxRepositoryImpl(application, decelerationDebugLogger)
     private val eventLogRepository: EventLogRepository = EventLogRepositoryImpl(application)
 
     private val saveManualEventUseCase = SaveManualEventUseCase(recordingRepository, configRepository)
@@ -321,5 +323,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val current = configRepository.getConfig()
         configRepository.updateConfig(current.copy(clearPreviousLogsAndVideosOnStart = clear))
         Log.i(TAG, "Updated clearPreviousLogsAndVideosOnStart to: $clear")
+    }
+
+    fun updateApproachCsvEnabled(enabled: Boolean) {
+        val current = configRepository.getConfig()
+        configRepository.updateConfig(current.copy(approachCsvEnabled = enabled))
+        Log.i(TAG, "Updated approachCsvEnabled to: $enabled")
+    }
+
+    fun updateAudioCsvEnabled(enabled: Boolean) {
+        val current = configRepository.getConfig()
+        configRepository.updateConfig(current.copy(audioCsvEnabled = enabled))
+        Log.i(TAG, "Updated audioCsvEnabled to: $enabled")
+    }
+
+    fun updateDecelerationCsvEnabled(enabled: Boolean) {
+        val current = configRepository.getConfig()
+        configRepository.updateConfig(current.copy(decelerationCsvEnabled = enabled))
+        Log.i(TAG, "Updated decelerationCsvEnabled to: $enabled")
+    }
+
+    fun updateCollisionCsvEnabled(enabled: Boolean) {
+        val current = configRepository.getConfig()
+        configRepository.updateConfig(current.copy(collisionCsvEnabled = enabled))
+        Log.i(TAG, "Updated collisionCsvEnabled to: $enabled")
+    }
+
+    fun shareDebugLogs() {
+        jp.hisanet.charisafe.data.debug.DebugLogShareManager.shareDebugLogs(getApplication())
+    }
+
+    fun deleteDebugLogs() {
+        jp.hisanet.charisafe.data.debug.DebugLogShareManager.deleteDebugLogs(getApplication())
     }
 }

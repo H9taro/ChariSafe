@@ -5,12 +5,16 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Log
+import jp.hisanet.charisafe.data.debug.AudioDebugLogger
 import kotlin.math.abs
 
 class AudioImpactDetector(
+    private val audioDebugLogger: AudioDebugLogger? = null,
     private val getSoundSensitivityAmplitude: () -> Float, // ユーザー設定の振幅値 (例: 1000〜32767, デフォルト5000)
     private val onLoudSoundDetected: () -> Unit
 ) {
+    constructor(getSoundSensitivityAmplitude: () -> Float, onLoudSoundDetected: () -> Unit) : this(null, getSoundSensitivityAmplitude, onLoudSoundDetected)
+
     companion object {
         private const val TAG = "AudioImpactDetector"
         private const val SAMPLE_RATE = 8000
@@ -69,7 +73,16 @@ class AudioImpactDetector(
                         val thresholdAmplitude = currentAmplitudeSetting.toInt().coerceIn(1000, 32767)
 
                         val now = System.currentTimeMillis()
-                        if (maxAmplitude >= thresholdAmplitude && now - lastTriggerTime > 15000L) { // クールダウン15秒
+                        val triggered = maxAmplitude >= thresholdAmplitude && now - lastTriggerTime > 15000L
+
+                        audioDebugLogger?.log(
+                            maxAmplitude = maxAmplitude,
+                            currentThreshold = thresholdAmplitude,
+                            soundSensitivity = currentAmplitudeSetting,
+                            triggered = triggered
+                        )
+
+                        if (triggered) {
                             lastTriggerTime = now
                             Log.w(TAG, "💥 [AudioImpact] 大音量検知! Amp: $maxAmplitude (Threshold: $thresholdAmplitude)")
                             onLoudSoundDetected()

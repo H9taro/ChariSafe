@@ -16,5 +16,9 @@ data class AppConfig(
     val approachCooldownSec: Long = 60L,
     val collisionCooldownSec: Long = 0L,
     val soundCooldownSec: Long = 30L,
-    val clearPreviousLogsAndVideosOnStart: Boolean = false
+    val clearPreviousLogsAndVideosOnStart: Boolean = false,
+    val approachCsvEnabled: Boolean = false,
+    val audioCsvEnabled: Boolean = false,
+    val decelerationCsvEnabled: Boolean = false,
+    val collisionCsvEnabled: Boolean = false
 )

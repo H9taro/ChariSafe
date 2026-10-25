@@ -40,6 +40,10 @@ import androidx.lifecycle.LifecycleRegistry
 import jp.hisanet.charisafe.MainActivity
 import jp.hisanet.charisafe.R
 import jp.hisanet.charisafe.data.camera.RearApproachDetector
+import jp.hisanet.charisafe.data.debug.ApproachDebugLogger
+import jp.hisanet.charisafe.data.debug.AudioDebugLogger
+import jp.hisanet.charisafe.data.debug.CollisionDebugLogger
+import jp.hisanet.charisafe.data.debug.DebugLogCleanupManager
 import jp.hisanet.charisafe.data.local.EventLogStore
 import jp.hisanet.charisafe.data.local.ringbuffer.Mp4Concatenator
 import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
@@ -104,6 +108,9 @@ class RecordingService : Service(), LifecycleOwner {
     private var pocketStorageDetector: PocketStorageDetector? = null
     private var collisionDropDetector: CollisionDropDetector? = null
     private var audioImpactDetector: AudioImpactDetector? = null
+    private var approachDebugLogger: ApproachDebugLogger? = null
+    private var audioDebugLogger: AudioDebugLogger? = null
+    private var collisionDebugLogger: CollisionDebugLogger? = null
 
     private var activeCamera: ActiveCamera = ActiveCamera.REAR
     private var ringBufferMinutes: Int = 5
@@ -135,6 +142,10 @@ class RecordingService : Service(), LifecycleOwner {
 
         ringBufferManager = RingBufferManager(this, ringBufferMinutes)
         createNotificationChannel()
+        DebugLogCleanupManager.cleanOldLogs(this)
+        approachDebugLogger = ApproachDebugLogger(this)
+        audioDebugLogger = AudioDebugLogger(this)
+        collisionDebugLogger = CollisionDebugLogger(this)
 
         pocketStorageDetector = PocketStorageDetector(this) { isStored ->
             if (isStored) {
@@ -146,15 +157,18 @@ class RecordingService : Service(), LifecycleOwner {
             }
         }
 
-        collisionDropDetector = CollisionDropDetector(this) {
+        collisionDropDetector = CollisionDropDetector(this, collisionDebugLogger) {
             Log.w(TAG, "💥 衝撃検知トリガー受領 -> 警告音＋自動イベント保存を実行します")
             triggerAutoEventWithAlert("衝撃")
         }
 
-        audioImpactDetector = AudioImpactDetector({
-            val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
-            prefs.getFloat("key_sound_sensitivity", 5000.0f)
-        }) {
+        audioImpactDetector = AudioImpactDetector(
+            audioDebugLogger = audioDebugLogger,
+            getSoundSensitivityAmplitude = {
+                val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
+                prefs.getFloat("key_sound_sensitivity", 5000.0f)
+            }
+        ) {
             Log.w(TAG, "💥 [AudioImpact] 音量検知トリガー受領 -> 警告音＋自動イベント保存を実行します")
             triggerAutoEventWithAlert("音量")
         }
@@ -320,13 +334,14 @@ class RecordingService : Service(), LifecycleOwner {
                 .build()
                 .apply {
                     setAnalyzer(analysisExecutor, RearApproachDetector(
-                        onApproachDetected = {
-                            Log.w(TAG, "🚨 [Priority2] 接近検知発火 -> 警告音＋自動イベント保存を実行します")
-                            triggerAutoEventWithAlert("接近")
-                        },
+                        approachDebugLogger = approachDebugLogger,
                         getApproachSensitivity = {
                             val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
                             prefs.getFloat("key_approach_sensitivity", 0.7f)
+                        },
+                        onApproachDetected = {
+                            Log.w(TAG, "🚨 [Priority2] 接近検知発火 -> 警告音＋自動イベント保存を実行します")
+                            triggerAutoEventWithAlert("接近")
                         }
                     ))
                 }

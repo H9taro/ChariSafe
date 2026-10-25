@@ -78,6 +78,7 @@ fun MainScreen(
 
     var hasCameraAudioPermissions by remember { mutableStateOf(checkCameraAudioPermissions(context)) }
     var hasLocationPermission by remember { mutableStateOf(checkLocationPermission(context)) }
+    var showDeleteLogsDialog by remember { mutableStateOf(false) }
 
     // アコーディオン開閉状態
     var isHistoryExpanded by remember { mutableStateOf(false) }
@@ -578,8 +579,112 @@ fun MainScreen(
                         enabled = !isRecording
                     )
                 }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(text = "【開発者向けデバッグ】", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        viewModel.updateApproachCsvEnabled(!uiState.config.approachCsvEnabled)
+                    }.padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "接近検知CSVログ出力", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Checkbox(
+                        checked = uiState.config.approachCsvEnabled,
+                        onCheckedChange = { viewModel.updateApproachCsvEnabled(it) }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        viewModel.updateAudioCsvEnabled(!uiState.config.audioCsvEnabled)
+                    }.padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "音量検知CSVログ出力", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Checkbox(
+                        checked = uiState.config.audioCsvEnabled,
+                        onCheckedChange = { viewModel.updateAudioCsvEnabled(it) }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        viewModel.updateDecelerationCsvEnabled(!uiState.config.decelerationCsvEnabled)
+                    }.padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "減速検知CSVログ出力", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Checkbox(
+                        checked = uiState.config.decelerationCsvEnabled,
+                        onCheckedChange = { viewModel.updateDecelerationCsvEnabled(it) }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        viewModel.updateCollisionCsvEnabled(!uiState.config.collisionCsvEnabled)
+                    }.padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "衝撃検知CSVログ出力", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Checkbox(
+                        checked = uiState.config.collisionCsvEnabled,
+                        onCheckedChange = { viewModel.updateCollisionCsvEnabled(it) }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { viewModel.shareDebugLogs() },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                        modifier = Modifier.weight(1f).height(36.dp)
+                    ) {
+                        Text("📤 ログ共有 (ZIP)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                    OutlinedButton(
+                        onClick = { showDeleteLogsDialog = true },
+                        modifier = Modifier.weight(1f).height(36.dp)
+                    ) {
+                        Text("🗑️ ログ削除", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                    }
+                }
             }
         }
+    }
+
+    if (showDeleteLogsDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showDeleteLogsDialog = false },
+            title = { Text("デバッグログの削除") },
+            text = { Text("保存されているすべてのデバッグログ（CSVファイル）を削除しますか？") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteLogsDialog = false
+                        viewModel.deleteDebugLogs()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("削除")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showDeleteLogsDialog = false }) {
+                    Text("キャンセル")
+                }
+            }
+        )
     }
 }
 

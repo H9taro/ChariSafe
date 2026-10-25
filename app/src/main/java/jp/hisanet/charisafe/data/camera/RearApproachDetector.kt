@@ -5,12 +5,17 @@ import android.media.AudioManager
 import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import jp.hisanet.charisafe.data.debug.ApproachDebugLogger
 import java.nio.ByteBuffer
 
 class RearApproachDetector(
-    private val onApproachDetected: () -> Unit,
-    private val getApproachSensitivity: () -> Float = { 0.7f }
+    private val approachDebugLogger: ApproachDebugLogger? = null,
+    private val getApproachSensitivity: () -> Float = { 0.7f },
+    private val onApproachDetected: () -> Unit
 ) : ImageAnalysis.Analyzer {
+
+    constructor(getApproachSensitivity: () -> Float, onApproachDetected: () -> Unit) : this(null, getApproachSensitivity, onApproachDetected)
+    constructor(onApproachDetected: () -> Unit) : this(null, { 0.7f }, onApproachDetected)
 
     companion object {
         private const val TAG = "RearApproachDetector"
@@ -96,9 +101,21 @@ class RearApproachDetector(
             val userSensitivity = getApproachSensitivity().coerceIn(0.3f, 1.0f)
             val dynamicScoreThreshold = 25.0f + (userSensitivity * 45.0f)
 
-            Log.d(TAG, "SCORE DEBUG -> Sens: $userSensitivity, Th: $dynamicScoreThreshold, Score: $approachScore, Consecutive: $consecutiveCount")
-
             val now = System.currentTimeMillis()
+            val triggered = (approachScore >= dynamicScoreThreshold) && (consecutiveCount >= REQUIRED_CONSECUTIVE_FRAMES) && (now - lastAlertTimestamp > COOLDOWN_MS)
+
+            approachDebugLogger?.log(
+                avgLuminosity = avgLuminosity,
+                currentRatio = currentRatio,
+                smoothedRatio = smoothedRatio,
+                expansionRate = expansionRate,
+                ratioScore = ratioScore,
+                expansionScore = expansionScore,
+                approachScore = approachScore,
+                dynamicScoreThreshold = dynamicScoreThreshold,
+                consecutiveCount = consecutiveCount,
+                triggered = triggered
+            )
 
             // 5. 連続成立フレーム判定 & スコア判定
             if (approachScore >= dynamicScoreThreshold) {

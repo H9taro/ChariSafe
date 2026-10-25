@@ -2,6 +2,7 @@ package jp.hisanet.charisafe.data.repository
 
 import android.content.Context
 import android.util.Log
+import jp.hisanet.charisafe.data.debug.DecelerationDebugLogger
 import jp.hisanet.charisafe.data.gpx.GpxFileWriter
 import jp.hisanet.charisafe.data.location.LocationTracker
 import jp.hisanet.charisafe.data.location.SpeedDecelerationDetector
@@ -18,7 +19,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class GpxRepositoryImpl(private val context: Context) : GpxRepository {
+class GpxRepositoryImpl(
+    private val context: Context,
+    private val decelerationDebugLogger: DecelerationDebugLogger? = null
+) : GpxRepository {
+    constructor(context: Context) : this(context, null)
 
     companion object {
         private const val TAG = "GpxRepositoryImpl"
@@ -33,6 +38,7 @@ class GpxRepositoryImpl(private val context: Context) : GpxRepository {
     var onDecelerationDetected: (() -> Unit)? = null
 
     private val decelerationDetector = SpeedDecelerationDetector(
+        decelerationDebugLogger = decelerationDebugLogger,
         getTargetSeconds = { 1.5f }
     ) {
         Log.w(TAG, "🚨 急減速検知コールバック発火 -> 自動イベント保存を実行します")
