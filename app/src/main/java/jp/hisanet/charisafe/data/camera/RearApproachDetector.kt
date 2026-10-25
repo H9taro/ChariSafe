@@ -8,19 +8,24 @@ import androidx.camera.core.ImageProxy
 import java.nio.ByteBuffer
 
 class RearApproachDetector(
-    private val onApproachDetected: () -> Unit
+    private val onApproachDetected: () -> Unit,
+    private val getApproachSensitivity: () -> Float = { 0.7f }
 ) : ImageAnalysis.Analyzer {
 
     companion object {
         private const val TAG = "RearApproachDetector"
-        private const val HIGH_BRIGHTNESS_PIXEL_THRESHOLD = 200 // 明るさの閾値
-        private const val HIGH_BRIGHTNESS_RATIO_TRIGGER = 0.03f // 3%以上が高輝度
-        private const val AREA_EXPANSION_RATIO = 1.3f // 1.3倍以上の急拡大
+        private const val HIGH_BRIGHTNESS_PIXEL_THRESHOLD = 200
+        private const val MAX_NIGHT_LUMINOSITY = 240.0 // テスト用に上限を緩和（屋内照明や街灯下でも動作するように調整）
+        private const val REQUIRED_CONSECUTIVE_FRAMES = 4 // 連続成立フレーム数
+        private const val COOLDOWN_MS = 5000L // クールダウンを5秒に短縮（連続する追い越し・接近に対応）
     }
 
-    private var previousHighBrightnessRatio = 0f
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
     private var lastAlertTimestamp = 0L
+
+    private val ratioHistory = FloatArray(5) { 0f }
+    private var historyIndex = 0
+    private var consecutiveCount = 0
 
     @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
     override fun analyze(imageProxy: ImageProxy) {
@@ -31,43 +36,88 @@ class RearApproachDetector(
         }
 
         try {
-            val buffer = mediaImage.planes[0].buffer
+            val plane = mediaImage.planes[0]
+            val buffer = plane.buffer
+            val width = mediaImage.width
+            val height = mediaImage.height
+            val rowStride = plane.rowStride
             val data = buffer.toByteArray()
-            val step = 4
+
+            // 1. 画面中央領域 (ROI): 水平 30%〜70%, 垂直 40%〜80%
+            val startX = (width * 0.3).toInt()
+            val endX = (width * 0.7).toInt()
+            val startY = (height * 0.4).toInt()
+            val endY = (height * 0.8).toInt()
+
             var totalLuminosity = 0L
             var highBrightnessPixelCount = 0
             var sampledCount = 0
+            val step = 4
 
-            (data.indices step step).forEach { i ->
-                val pixel = data[i].toInt() and 0xFF
-                totalLuminosity += pixel
-                sampledCount++
-
-                if (pixel >= HIGH_BRIGHTNESS_PIXEL_THRESHOLD) {
-                    highBrightnessPixelCount++
+            for (y in startY until endY step step) {
+                val rowOffset = y * rowStride
+                for (x in startX until endX step step) {
+                    if (rowOffset + x < data.size) {
+                        val pixel = data[rowOffset + x].toInt() and 0xFF
+                        totalLuminosity += pixel
+                        sampledCount++
+                        if (pixel >= HIGH_BRIGHTNESS_PIXEL_THRESHOLD) {
+                            highBrightnessPixelCount++
+                        }
+                    }
                 }
             }
 
             val avgLuminosity = if (sampledCount > 0) totalLuminosity.toDouble() / sampledCount else 0.0
-            val highBrightnessRatio = highBrightnessPixelCount.toFloat() / sampledCount
+            val currentRatio = if (sampledCount > 0) highBrightnessPixelCount.toFloat() / sampledCount else 0f
+
+            // 2. 夜間限定フィルタ (明るい環境や昼間は無視)
+            if (avgLuminosity > MAX_NIGHT_LUMINOSITY) {
+                consecutiveCount = 0
+                imageProxy.close()
+                return
+            }
+
+            // 3. 移動平均による平滑化
+            ratioHistory[historyIndex] = currentRatio
+            historyIndex = (historyIndex + 1) % ratioHistory.size
+            val smoothedRatio = ratioHistory.average().toFloat()
+
+            // 前フレームとの比較による拡大率
+            val prevRatio = ratioHistory[(historyIndex - 2 + ratioHistory.size) % ratioHistory.size]
+            val expansionRate = if (prevRatio > 0.001f) smoothedRatio / prevRatio else 1.0f
+
+            // 4. 接近スコア計算 (高輝度率 + 拡大率ボーナス)
+            val ratioScore = (smoothedRatio * 100f).coerceAtMost(50f) // 最大50点
+            val expansionScore = if (expansionRate > 1.2f) ((expansionRate - 1.0f) * 50f).coerceAtMost(50f) else 0f // 最大50点
+            val approachScore = ratioScore + expansionScore
+
+            // 接近感度スライダー連動 (30%敏感=38.5 〜 100%鈍感=70.0)
+            val userSensitivity = getApproachSensitivity().coerceIn(0.3f, 1.0f)
+            val dynamicScoreThreshold = 25.0f + (userSensitivity * 45.0f)
+
+            Log.d(TAG, "SCORE DEBUG -> Sens: $userSensitivity, Th: $dynamicScoreThreshold, Score: $approachScore, Consecutive: $consecutiveCount")
 
             val now = System.currentTimeMillis()
-            // 簡易テストのため、夜間判定（暗所）または急激な高輝度領域の出現・拡大を検知
-            if (highBrightnessRatio >= HIGH_BRIGHTNESS_RATIO_TRIGGER) {
-                if (previousHighBrightnessRatio > 0f && highBrightnessRatio >= previousHighBrightnessRatio * AREA_EXPANSION_RATIO) {
-                    if (now - lastAlertTimestamp > 10000L) { // 10秒間隔のクールダウン
-                        Log.w(TAG, "🚨 後方車両接近検知! AvgLum: $avgLuminosity, Ratio: $highBrightnessRatio (Prev: $previousHighBrightnessRatio)")
+
+            // 5. 連続成立フレーム判定 & スコア判定
+            if (approachScore >= dynamicScoreThreshold) {
+                consecutiveCount++
+                Log.d(TAG, "🎯 接近候補成立 [Count: $consecutiveCount/$REQUIRED_CONSECUTIVE_FRAMES] Score: $approachScore (Th: $dynamicScoreThreshold)")
+
+                if (consecutiveCount >= REQUIRED_CONSECUTIVE_FRAMES) {
+                    if (now - lastAlertTimestamp > COOLDOWN_MS) {
+                        Log.w(TAG, "🚨 後方車両接近検知確定! Score: $approachScore (Th: $dynamicScoreThreshold), AvgLum: $avgLuminosity")
                         lastAlertTimestamp = now
-                        
-                        // 1. 警告音再生
+                        consecutiveCount = 0
+
                         toneGenerator.startTone(ToneGenerator.TONE_DTMF_S, 600)
-                        
-                        // 2. 自動イベント保存発火
                         onApproachDetected()
                     }
                 }
+            } else {
+                if (consecutiveCount > 0) consecutiveCount--
             }
-            previousHighBrightnessRatio = highBrightnessRatio
 
         } catch (e: Exception) {
             Log.e(TAG, "Error analyzing image frame for approach", e)

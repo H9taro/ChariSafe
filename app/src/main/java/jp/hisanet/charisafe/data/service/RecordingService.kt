@@ -319,10 +319,16 @@ class RecordingService : Service(), LifecycleOwner {
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
                 .apply {
-                    setAnalyzer(analysisExecutor, RearApproachDetector {
-                        Log.w(TAG, "🚨 [Priority2] 接近検知発火 -> 警告音＋自動イベント保存を実行します")
-                        triggerAutoEventWithAlert("接近")
-                    })
+                    setAnalyzer(analysisExecutor, RearApproachDetector(
+                        onApproachDetected = {
+                            Log.w(TAG, "🚨 [Priority2] 接近検知発火 -> 警告音＋自動イベント保存を実行します")
+                            triggerAutoEventWithAlert("接近")
+                        },
+                        getApproachSensitivity = {
+                            val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
+                            prefs.getFloat("key_approach_sensitivity", 0.7f)
+                        }
+                    ))
                 }
 
             provider.bindToLifecycle(
