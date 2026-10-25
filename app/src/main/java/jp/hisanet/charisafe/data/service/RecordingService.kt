@@ -160,7 +160,7 @@ class RecordingService : Service(), LifecycleOwner {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
         val camName = intent?.getStringExtra(EXTRA_ACTIVE_CAMERA) ?: ActiveCamera.REAR.name
-        activeCamera = try { ActiveCamera.valueOf(camName) } catch (e: Exception) { ActiveCamera.REAR }
+        activeCamera = ActiveCamera.valueOf(camName)
         ringBufferMinutes = intent?.getIntExtra(EXTRA_RING_BUFFER_MINUTES, 5) ?: 5
         targetFps = intent?.getIntExtra(EXTRA_TARGET_FPS, 10) ?: 10
         userConfigFps = targetFps
@@ -178,7 +178,7 @@ class RecordingService : Service(), LifecycleOwner {
                 acquireWakeLock()
                 pocketStorageDetector?.startListening()
                 collisionDropDetector?.startListening()
-                audioImpactDetector?.startListening(this)
+                audioImpactDetector?.startListening()
                 startRecordingPipeline()
             }
             ACTION_STOP_RECORDING -> {
@@ -400,7 +400,7 @@ class RecordingService : Service(), LifecycleOwner {
                 activeRecording?.stop()
                 activeRecording = null
             }
-            delay(500L)
+            delay(timeMillis = 500L)
 
             val segments = ringBufferManager?.getRecentSegmentsForExport(beforeMinutes) ?: emptyList()
             val validSegments = if (currentFile.exists() && currentFile.length() > 0 && !segments.contains(currentFile)) {
@@ -439,9 +439,7 @@ class RecordingService : Service(), LifecycleOwner {
 
             val success = Mp4Concatenator.concatenate(workingFiles, eventFile)
 
-            try {
-                workingDir.deleteRecursively()
-            } catch (ignored: Exception) {}
+            workingDir.deleteRecursively()
 
             if (success) {
                 MediaScannerConnection.scanFile(this@RecordingService, arrayOf(eventFile.absolutePath), null, null)

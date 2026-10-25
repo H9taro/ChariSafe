@@ -89,7 +89,7 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
             val currentConfig = configRepository.getConfig()
             val targetMinutes = currentConfig.ringBufferMinutes
 
-            val eventFile = suspendCancellableCoroutine<File?> { continuation ->
+            val eventFile = suspendCancellableCoroutine { continuation ->
                 service.exportEventAsync("手動保存", targetMinutes) { file ->
                     continuation.resume(file)
                 }

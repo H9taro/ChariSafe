@@ -56,7 +56,6 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import jp.hisanet.charisafe.data.location.LocationTracker
 import jp.hisanet.charisafe.domain.model.ActiveCamera
 import jp.hisanet.charisafe.domain.model.EventType
 import jp.hisanet.charisafe.domain.model.RecordingState
@@ -67,6 +66,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.time.Duration.Companion.milliseconds
+import androidx.core.net.toUri
 
 @Composable
 fun MainScreen(
@@ -144,14 +144,15 @@ fun MainScreen(
     }
 
     val shareMapLocation: (Double, Double) -> Unit = { lat, lon ->
-        val uri = Uri.parse("geo:$lat,$lon?q=$lat,$lon(ChariSafe+Event)")
+        val uri = "geo:$lat,$lon?q=$lat,$lon(ChariSafe+Event)".toUri()
         val intent = Intent(Intent.ACTION_VIEW, uri).apply {
             setPackage("com.google.android.apps.maps")
         }
         try {
             context.startActivity(intent)
         } catch (e: Exception) {
-            val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://maps.google.com/?q=$lat,$lon"))
+            val browserIntent = Intent(Intent.ACTION_VIEW,
+                "https://maps.google.com/?q=$lat,$lon".toUri())
             context.startActivity(browserIntent)
         }
     }
@@ -159,9 +160,9 @@ fun MainScreen(
     val shareRoute = {
         try {
             val gpxDir = FileUtils.getGpxDir(context)
-            val latestGpxFile = gpxDir.listFiles { _, name -> name.startsWith("ride_") && name.endsWith(".gpx") }
-                ?.sortedByDescending { it.lastModified() }
-                ?.firstOrNull()
+            val latestGpxFile =
+                gpxDir.listFiles { _, name -> name.startsWith("ride_") && name.endsWith(".gpx") }
+                    ?.maxByOrNull { it.lastModified() }
 
             if (latestGpxFile != null && latestGpxFile.exists() && latestGpxFile.length() > 0) {
                 val uri = FileProvider.getUriForFile(

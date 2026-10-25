@@ -26,7 +26,7 @@ object EventLogStore {
     fun saveEvents(context: Context, logs: List<EventLog>) {
         try {
             val jsonArray = JSONArray()
-            for (log in logs) {
+            logs.forEach { log ->
                 val obj = JSONObject().apply {
                     put("id", log.id)
                     put("timestampMs", log.timestampMs)

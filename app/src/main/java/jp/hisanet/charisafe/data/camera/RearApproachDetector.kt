@@ -13,7 +13,6 @@ class RearApproachDetector(
 
     companion object {
         private const val TAG = "RearApproachDetector"
-        private const val DARK_LUMINOSITY_THRESHOLD = 80.0 // テストしやすように暗所判定の閾値を少し緩和
         private const val HIGH_BRIGHTNESS_PIXEL_THRESHOLD = 200 // 明るさの閾値
         private const val HIGH_BRIGHTNESS_RATIO_TRIGGER = 0.03f // 3%以上が高輝度
         private const val AREA_EXPANSION_RATIO = 1.3f // 1.3倍以上の急拡大
@@ -39,7 +38,7 @@ class RearApproachDetector(
             var highBrightnessPixelCount = 0
             var sampledCount = 0
 
-            for (i in 0 until data.size step step) {
+            (data.indices step step).forEach { i ->
                 val pixel = data[i].toInt() and 0xFF
                 totalLuminosity += pixel
                 sampledCount++

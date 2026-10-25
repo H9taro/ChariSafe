@@ -17,7 +17,6 @@ import jp.hisanet.charisafe.domain.model.EventType
 import jp.hisanet.charisafe.domain.model.RecordingState
 import jp.hisanet.charisafe.domain.model.RideSummary
 import jp.hisanet.charisafe.domain.model.SystemStatus
-import jp.hisanet.charisafe.domain.model.VideoResolution
 import jp.hisanet.charisafe.domain.repository.ConfigRepository
 import jp.hisanet.charisafe.domain.repository.EventLogRepository
 import jp.hisanet.charisafe.domain.repository.GpxRepository
@@ -26,7 +25,6 @@ import jp.hisanet.charisafe.domain.usecase.SaveManualEventUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -233,7 +231,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     totalDistKm += dist
                 }
             }
-            for (p in recordedPoints) {
+            recordedPoints.forEach { p ->
                 if (p.speedKmh > maxSpd) maxSpd = p.speedKmh
                 speedSum += p.speedKmh
                 countSpd++
@@ -282,18 +280,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return r * c
     }
 
-    fun selectEventFile(file: File?) {
-        _selectedEventFile.value = file
-    }
-
-    fun removeEventFile(file: File) {
-        val currentList = _savedEventFiles.value.toMutableList()
-        if (currentList.remove(file)) {
-            if (file.exists()) file.delete()
-            _savedEventFiles.value = currentList
-        }
-    }
-
     fun updateActiveCamera(activeCamera: ActiveCamera) {
         val current = configRepository.getConfig()
         configRepository.updateConfig(current.copy(activeCamera = activeCamera))
@@ -312,11 +298,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateRingBuffer(minutes: Int) {
         val current = configRepository.getConfig()
         configRepository.updateConfig(current.copy(ringBufferMinutes = minutes))
-    }
-
-    fun updateResolution(resolution: VideoResolution) {
-        val current = configRepository.getConfig()
-        configRepository.updateConfig(current.copy(resolution = resolution))
     }
 
     fun updateSensitivity(sensitivity: EventSensitivity) {

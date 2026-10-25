@@ -5,14 +5,13 @@ import android.content.Context
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
-import android.os.Bundle
 import android.util.Log
 import jp.hisanet.charisafe.domain.model.GpxPoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class LocationTracker(private val context: Context) {
+class LocationTracker(context: Context) {
 
     companion object {
         private const val TAG = "LocationTracker"
@@ -46,8 +45,6 @@ class LocationTracker(private val context: Context) {
                 Log.i(TAG, "🟢 FRESH GPS/Network Location updated: lat=${point.latitude}, lon=${point.longitude}, speed=${point.speedKmh} km/h")
             }
 
-            @Deprecated("Deprecated in API 29")
-            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
             override fun onProviderEnabled(provider: String) {}
             override fun onProviderDisabled(provider: String) {}
         }

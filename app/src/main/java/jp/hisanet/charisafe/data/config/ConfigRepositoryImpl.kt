@@ -21,7 +21,7 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
         private const val KEY_RING_BUFFER = "key_ring_buffer"
         private const val KEY_RESOLUTION = "key_resolution"
         private const val KEY_AUDIO_ENABLED = "key_audio_enabled"
-        private const val KEY_DECEL_COOLDOWN = "key_decel_cooldown"
+        private const val KEY_DECELERATION_COOLDOWN = "key_decel_cooldown"
         private const val KEY_APPROACH_COOLDOWN = "key_approach_cooldown"
         private const val KEY_COLLISION_COOLDOWN = "key_collision_cooldown"
         private const val KEY_SOUND_COOLDOWN = "key_sound_cooldown"
@@ -46,7 +46,7 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
         val ringBuffer = prefs.getInt(KEY_RING_BUFFER, 5)
         val audioEnabled = prefs.getBoolean(KEY_AUDIO_ENABLED, true)
 
-        val decelCooldown = prefs.getLong(KEY_DECEL_COOLDOWN, 30L)
+        val decelerationCooldown = prefs.getLong(KEY_DECELERATION_COOLDOWN, 30L)
         val approachCooldown = prefs.getLong(KEY_APPROACH_COOLDOWN, 60L)
         val collisionCooldown = prefs.getLong(KEY_COLLISION_COOLDOWN, 0L)
         val soundCooldown = prefs.getLong(KEY_SOUND_COOLDOWN, 30L)
@@ -67,7 +67,7 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
             ringBufferMinutes = ringBuffer,
             resolution = resolution,
             audioEnabled = audioEnabled,
-            decelerationCooldownSec = decelCooldown,
+            decelerationCooldownSec = decelerationCooldown,
             approachCooldownSec = approachCooldown,
             collisionCooldownSec = collisionCooldown,
             soundCooldownSec = soundCooldown,
@@ -85,7 +85,7 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
                 .putInt(KEY_RING_BUFFER, config.ringBufferMinutes)
                 .putString(KEY_RESOLUTION, config.resolution.name)
                 .putBoolean(KEY_AUDIO_ENABLED, config.audioEnabled)
-                .putLong(KEY_DECEL_COOLDOWN, config.decelerationCooldownSec)
+                .putLong(KEY_DECELERATION_COOLDOWN, config.decelerationCooldownSec)
                 .putLong(KEY_APPROACH_COOLDOWN, config.approachCooldownSec)
                 .putLong(KEY_COLLISION_COOLDOWN, config.collisionCooldownSec)
                 .putLong(KEY_SOUND_COOLDOWN, config.soundCooldownSec)

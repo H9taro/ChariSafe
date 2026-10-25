@@ -2,11 +2,11 @@ package jp.hisanet.charisafe.domain.model
 
 import java.util.UUID
 
-enum class EventType(val displayName: String, val emoji: String, val orderIndex: Int) {
-    DECELERATION("減速", "⚠", 0),
-    APPROACH("接近", "🚗", 1),
-    COLLISION("衝撃", "💥", 2),
-    SOUND("音量", "🔊", 3)
+enum class EventType(val displayName: String, val emoji: String) {
+    DECELERATION("減速", "⚠"),
+    APPROACH("接近", "🚗"),
+    COLLISION("衝撃", "💥"),
+    SOUND("音量", "🔊")
 }
 
 data class EventLog(
@@ -28,10 +28,7 @@ data class EventCountSummary(
     val approachCount: Int = 0,
     val collisionCount: Int = 0,
     val soundCount: Int = 0
-) {
-    val totalCount: Int
-        get() = decelerationCount + approachCount + collisionCount + soundCount
-}
+)
 
 data class EventSensitivity(
     val decelerationSensitivity: Float = 1.5f,  // 減速までの秒数 (左=敏感 0.5s 〜 右=鈍感 3.0s)

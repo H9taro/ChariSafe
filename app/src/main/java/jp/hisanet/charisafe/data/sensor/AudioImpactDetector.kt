@@ -1,7 +1,6 @@
 package jp.hisanet.charisafe.data.sensor
 
 import android.annotation.SuppressLint
-import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -22,7 +21,7 @@ class AudioImpactDetector(
     private var listeningThread: Thread? = null
 
     @SuppressLint("MissingPermission")
-    fun startListening(context: Context) {
+    fun startListening() {
         if (isListening) return
 
         try {
