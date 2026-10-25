@@ -26,7 +26,6 @@ class CollisionDropDetector(
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val accelerometer: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
     private var isRegistered = false
-    private var lastTriggerTime = 0L
 
     fun startListening() {
         if (accelerometer != null && !isRegistered) {
@@ -54,8 +53,7 @@ class CollisionDropDetector(
             val acceleration = sqrt((x * x + (y * y).toDouble() + (z * z)).toDouble()).toFloat()
             val gForce = acceleration / GRAVITY_G
 
-            val now = System.currentTimeMillis()
-            val triggered = gForce >= SHOCK_THRESHOLD_G && now - lastTriggerTime > 10000L
+            val triggered = gForce >= SHOCK_THRESHOLD_G
 
             collisionDebugLogger?.log(
                 gForce = gForce,
@@ -64,7 +62,6 @@ class CollisionDropDetector(
             )
 
             if (triggered) {
-                lastTriggerTime = now
                 Log.w(TAG, "💥 衝突・落下検知! G-Force: ${String.format(java.util.Locale.US, "%.2f", gForce)}G")
                 onCollisionOrDropDetected()
             }

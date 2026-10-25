@@ -9,17 +9,17 @@ import android.util.Log
 import jp.hisanet.charisafe.data.config.ConfigRepositoryImpl
 import jp.hisanet.charisafe.data.service.RecordingService
 import jp.hisanet.charisafe.domain.model.AppConfig
+import jp.hisanet.charisafe.domain.model.EventType
 import jp.hisanet.charisafe.domain.model.RecordingState
 import jp.hisanet.charisafe.domain.repository.ConfigRepository
 import jp.hisanet.charisafe.domain.repository.RecordingRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
-import kotlin.coroutines.resume
 
 class RecordingRepositoryImpl(private val context: Context) : RecordingRepository {
 
@@ -89,17 +89,18 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
             val currentConfig = configRepository.getConfig()
             val targetMinutes = currentConfig.ringBufferMinutes
 
-            val eventFile = suspendCancellableCoroutine { continuation ->
-                service.exportEventAsync("手動保存", targetMinutes) { file ->
-                    continuation.resume(file)
-                }
-            }
+            service.handleDetectedEvent(EventType.APPROACH, 1.0f, "手動イベント保存")
+            delay(2500L)
+
+            val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir(context)
+            val files = recordingsDir.listFiles { _, name -> name.startsWith("event_") && name.endsWith(".mp4") }
+            val latestFile = files?.maxByOrNull { it.lastModified() }
 
             _recordingState.value = RecordingState.RECORDING
 
-            if (eventFile != null) {
-                Log.i(TAG, "Successfully exported manual event video (${targetMinutes}m limit): ${eventFile.absolutePath}")
-                eventFile
+            if (latestFile != null) {
+                Log.i(TAG, "Successfully exported manual event video: ${latestFile.absolutePath}")
+                latestFile
             } else {
                 Log.e(TAG, "Failed to export manual event video")
                 null

@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -33,6 +34,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -52,11 +54,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import jp.hisanet.charisafe.domain.model.ActiveCamera
 import jp.hisanet.charisafe.domain.model.EventType
+import jp.hisanet.charisafe.domain.model.IncidentStatus
 import jp.hisanet.charisafe.domain.model.RecordingState
 import jp.hisanet.charisafe.util.FileUtils
 import kotlinx.coroutines.delay
@@ -65,7 +69,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.time.Duration.Companion.milliseconds
-import androidx.core.net.toUri
 
 @Composable
 fun MainScreen(
@@ -150,7 +153,7 @@ fun MainScreen(
         }
         try {
             context.startActivity(intent)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             val browserIntent = Intent(Intent.ACTION_VIEW,
                 "https://maps.google.com/?q=$lat,$lon".toUri())
             context.startActivity(browserIntent)
@@ -264,14 +267,8 @@ fun MainScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         // 2. 最後のイベントカード
-        if (uiState.lastEvent != null) {
-            val last = uiState.lastEvent!!
-            val sensitivityText = when (last.eventType) {
-                EventType.DECELERATION -> "感度: ${last.decelerationSensitivity}秒"
-                EventType.APPROACH -> "感度: ${(last.approachSensitivity * 100).toInt()}%"
-                EventType.COLLISION -> "感度: ${last.collisionSensitivity}G"
-                EventType.SOUND -> "感度: ${last.soundSensitivity.toInt()}"
-            }
+        if (uiState.lastDetectionLog != null) {
+            val last = uiState.lastDetectionLog!!
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
                 modifier = Modifier.fillMaxWidth()
@@ -280,7 +277,7 @@ fun MainScreen(
                     Text(text = "🚨 最後のイベント検知", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.onTertiaryContainer)
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "${last.eventType.emoji} ${last.eventType.displayName} ($sensitivityText)",
+                        text = "${last.eventType.emoji} ${last.eventType.displayName} (${last.sensitivityLabel})",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onTertiaryContainer
@@ -411,7 +408,7 @@ fun MainScreen(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Box(modifier = Modifier.weight(1f)) {
-                            EventFilterBadge("全(${uiState.eventLogs.size})", isSelected = selectedFilterType == null) { selectedFilterType = null }
+                            EventFilterBadge("全(${uiState.eventDetectionLogs.size})", isSelected = selectedFilterType == null) { selectedFilterType = null }
                         }
                         Box(modifier = Modifier.weight(1f)) {
                             EventFilterBadge("⚠ 減速(${uiState.eventCounts.decelerationCount})", isSelected = selectedFilterType == EventType.DECELERATION) { selectedFilterType = EventType.DECELERATION }
@@ -442,47 +439,114 @@ fun MainScreen(
         // 【折りたたみエリア (Accordion)】
         // ==========================================
 
-        val filteredLogs = if (selectedFilterType == null) uiState.eventLogs else uiState.eventLogs.filter { it.eventType == selectedFilterType }
+        val filteredDetections = if (selectedFilterType == null) uiState.eventDetectionLogs else uiState.eventDetectionLogs.filter { it.eventType == selectedFilterType }
 
-        AccordionSection(title = "📁 イベント履歴 (${filteredLogs.size}件)", expanded = isHistoryExpanded, onToggle = { isHistoryExpanded = !isHistoryExpanded }) {
-            if (filteredLogs.isEmpty()) {
+        AccordionSection(title = "📁 イベント履歴 (${filteredDetections.size}件)", expanded = isHistoryExpanded, onToggle = { isHistoryExpanded = !isHistoryExpanded }) {
+            if (filteredDetections.isEmpty()) {
                 Text("該当するイベント履歴はありません", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(8.dp))
             } else {
-                filteredLogs.forEach { log ->
+                filteredDetections.forEach { det ->
                     Card(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
-                            val sensitivityText = when (log.eventType) {
-                                EventType.DECELERATION -> "感度: ${log.decelerationSensitivity}秒"
-                                EventType.APPROACH -> "感度: ${(log.approachSensitivity * 100).toInt()}%"
-                                EventType.COLLISION -> "感度: ${log.collisionSensitivity}G"
-                                EventType.SOUND -> "感度: ${log.soundSensitivity.toInt()}"
-                            }
-                            Text(text = "${log.eventType.emoji} ${log.eventType.displayName}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Text(text = "時刻: ${SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US).format(Date(log.timestampMs))}", fontSize = 11.sp, color = Color.Gray)
-                            Text(text = sensitivityText, fontSize = 11.sp, color = Color.DarkGray)
-
-                            Spacer(modifier = Modifier.height(8.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                if (!log.videoFilePath.isNullOrEmpty()) {
-                                    Button(
-                                        onClick = { shareFile(File(log.videoFilePath)) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                        modifier = Modifier.weight(1f).height(36.dp)
+                                Text(text = "${det.eventType.emoji} ${det.eventType.displayName}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                if (!det.incidentId.isNullOrEmpty()) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        shape = RoundedCornerShape(4.dp)
                                     ) {
-                                        Text("▶ 動画再生・共有", fontSize = 11.sp)
+                                        Text(text = "🎥 動画あり", fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.onPrimaryContainer)
                                     }
                                 }
-                                OutlinedButton(
-                                    onClick = { shareMapLocation(log.latitude, log.longitude) },
-                                    modifier = Modifier.weight(1f).height(36.dp)
+                            }
+                            Text(text = "時刻: ${SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US).format(Date(det.timestampMs))}", fontSize = 11.sp, color = Color.Gray)
+                            Text(text = det.sensitivityLabel, fontSize = 11.sp, color = Color.DarkGray)
+                            Text(text = "速度: ${String.format(Locale.US, "%.1f", det.speedKmh)} km/h", fontSize = 11.sp, color = Color.DarkGray)
+
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OutlinedButton(
+                                onClick = { shareMapLocation(det.latitude, det.longitude) },
+                                modifier = Modifier.fillMaxWidth().height(32.dp)
+                            ) {
+                                Text("📍 Map共有", fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        var isIncidentsExpanded by remember { mutableStateOf(true) }
+        AccordionSection(title = "🎥 保存動画一覧 (${uiState.incidentLogs.size}件)", expanded = isIncidentsExpanded, onToggle = { isIncidentsExpanded = !isIncidentsExpanded }) {
+            if (uiState.incidentLogs.isEmpty()) {
+                Text("保存されたインシデント動画はありません", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(8.dp))
+            } else {
+                uiState.incidentLogs.forEach { inc ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = "🚨 ${inc.triggerEventType.emoji} ${inc.triggerEventType.displayName}インシデント", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                val statusColor = when (inc.status) {
+                                    IncidentStatus.SUCCESS -> Color(0xFF2E7D32)
+                                    IncidentStatus.PENDING -> Color(0xFFE65100)
+                                    IncidentStatus.FAILED -> Color(0xFFC62828)
+                                }
+                                Surface(
+                                    color = statusColor.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(4.dp)
                                 ) {
-                                    Text("📍 Map共有", fontSize = 11.sp)
+                                    Text(text = inc.status.displayName, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = statusColor)
+                                }
+                            }
+                            Text(text = "時刻: ${SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US).format(Date(inc.timestampMs))}", fontSize = 11.sp, color = Color.Gray)
+                            if (inc.highestSeverityType != inc.triggerEventType) {
+                                Text(text = "最高危険度: ${inc.highestSeverityType.emoji} ${inc.highestSeverityType.displayName}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                            }
+
+                            if (inc.videoFilePath.isEmpty() || !File(inc.videoFilePath).exists()) {
+                                if (inc.status == IncidentStatus.FAILED) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(text = "理由: ${inc.failureReason ?: "不明なエラー"}", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                                }
+                            } else {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = { shareFile(File(inc.videoFilePath)) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                    modifier = Modifier.fillMaxWidth().height(36.dp)
+                                ) {
+                                    Text("▶ 動画再生・共有 (${File(inc.videoFilePath).name})", fontSize = 11.sp)
+                                }
+                            }
+
+                            if (inc.relatedDetectionIds.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(text = "▼ 一連の発生イベントタイムライン (${inc.relatedDetectionIds.size}件):", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                val relatedDetections = uiState.eventDetectionLogs.filter { inc.relatedDetectionIds.contains(it.id) }.sortedBy { it.timestampMs }
+                                relatedDetections.forEach { rd ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 2.dp, bottom = 2.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(text = "• ${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(rd.timestampMs))} ${rd.eventType.emoji} ${rd.eventType.displayName}", fontSize = 10.sp)
+                                        Text(text = rd.sensitivityLabel, fontSize = 10.sp, color = Color.Gray)
+                                    }
                                 }
                             }
                         }

@@ -2,8 +2,10 @@ package jp.hisanet.charisafe.data.repository
 
 import android.content.Context
 import android.util.Log
-import jp.hisanet.charisafe.data.local.EventLogStore
-import jp.hisanet.charisafe.domain.model.EventLog
+import jp.hisanet.charisafe.data.local.EventDetectionLogStore
+import jp.hisanet.charisafe.data.local.IncidentLogStore
+import jp.hisanet.charisafe.domain.model.EventDetectionLog
+import jp.hisanet.charisafe.domain.model.IncidentLog
 import jp.hisanet.charisafe.domain.repository.EventLogRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,39 +17,63 @@ class EventLogRepositoryImpl(private val context: Context) : EventLogRepository 
         private const val TAG = "EventLogRepositoryImpl"
     }
 
-    private val _eventLogs = MutableStateFlow<List<EventLog>>(emptyList())
-    override val eventLogs: StateFlow<List<EventLog>> = _eventLogs.asStateFlow()
+    private val _eventDetectionLogs = MutableStateFlow<List<EventDetectionLog>>(emptyList())
+    override val eventDetectionLogs: StateFlow<List<EventDetectionLog>> = _eventDetectionLogs.asStateFlow()
 
-    private val _lastEvent = MutableStateFlow<EventLog?>(null)
-    override val lastEvent: StateFlow<EventLog?> = _lastEvent.asStateFlow()
+    private val _incidentLogs = MutableStateFlow<List<IncidentLog>>(emptyList())
+    override val incidentLogs: StateFlow<List<IncidentLog>> = _incidentLogs.asStateFlow()
+
+    private val _lastDetectionLog = MutableStateFlow<EventDetectionLog?>(null)
+    override val lastDetectionLog: StateFlow<EventDetectionLog?> = _lastDetectionLog.asStateFlow()
 
     init {
         reload()
     }
 
     override fun reload() {
-        val loaded = EventLogStore.loadEvents(context)
-        _eventLogs.value = loaded
-        if (loaded.isNotEmpty()) {
-            _lastEvent.value = loaded.first()
+        val loadedDetections = EventDetectionLogStore.loadLogs(context)
+        _eventDetectionLogs.value = loadedDetections
+        if (loadedDetections.isNotEmpty()) {
+            _lastDetectionLog.value = loadedDetections.first()
         }
-        Log.i(TAG, "Reloaded EventLogRepository from storage: ${loaded.size} logs found")
+
+        val loadedIncidents = IncidentLogStore.loadIncidents(context)
+        _incidentLogs.value = loadedIncidents
+
+        Log.i(TAG, "Reloaded repository: ${loadedDetections.size} detections, ${loadedIncidents.size} incidents")
     }
 
-    override fun addEvent(eventLog: EventLog) {
-        val currentList = _eventLogs.value.toMutableList()
-        currentList.add(0, eventLog)
-        _eventLogs.value = currentList
-        _lastEvent.value = eventLog
+    override fun addDetectionLog(log: EventDetectionLog) {
+        val currentList = _eventDetectionLogs.value.toMutableList()
+        currentList.add(0, log)
+        _eventDetectionLogs.value = currentList
+        _lastDetectionLog.value = log
 
-        EventLogStore.saveEvents(context, currentList)
-        Log.i(TAG, "Added and persisted new EventLog: ${eventLog.eventType} at speed ${eventLog.speedKmh}km/h")
+        EventDetectionLogStore.saveLogs(context, currentList)
+        Log.i(TAG, "Added EventDetectionLog: ${log.eventType} at speed ${log.speedKmh}km/h")
     }
 
-    override fun clearEvents() {
-        _eventLogs.value = emptyList()
-        _lastEvent.value = null
-        EventLogStore.saveEvents(context, emptyList())
-        Log.i(TAG, "Cleared all event logs and storage")
+    override fun addOrUpdateIncidentLog(incident: IncidentLog) {
+        val currentList = _incidentLogs.value.toMutableList()
+        val index = currentList.indexOfFirst { it.id == incident.id }
+        if (index >= 0) {
+            currentList[index] = incident
+        } else {
+            currentList.add(0, incident)
+        }
+        _incidentLogs.value = currentList.sortedByDescending { it.timestampMs }
+
+        IncidentLogStore.saveIncidents(context, _incidentLogs.value)
+        Log.i(TAG, "Added/Updated IncidentLog: ${incident.triggerEventType} status=${incident.status}")
+    }
+
+    override fun clearAll() {
+        _eventDetectionLogs.value = emptyList()
+        _incidentLogs.value = emptyList()
+        _lastDetectionLog.value = null
+
+        EventDetectionLogStore.saveLogs(context, emptyList())
+        IncidentLogStore.saveIncidents(context, emptyList())
+        Log.i(TAG, "Cleared all detection logs and incident logs")
     }
 }

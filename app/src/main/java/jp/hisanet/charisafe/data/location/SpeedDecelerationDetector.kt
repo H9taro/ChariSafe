@@ -17,7 +17,6 @@ class SpeedDecelerationDetector(
     }
 
     private val speedHistory = mutableListOf<GpxPoint>()
-    private var lastTriggerTimeMs = 0L
 
     @Synchronized
     fun feedPoint(point: GpxPoint) {
@@ -35,7 +34,7 @@ class SpeedDecelerationDetector(
         val targetDurationMs = (getTargetSeconds() * 1000f).toLong().coerceIn(500L, 3000L)
 
         val speedDrop = oldest.speedKmh - latest.speedKmh
-        val triggered = timeDeltaMs in 1L..targetDurationMs && speedDrop >= MIN_SPEED_DROP_KMH && now - lastTriggerTimeMs > 30000L
+        val triggered = timeDeltaMs in 1L..targetDurationMs && speedDrop >= MIN_SPEED_DROP_KMH
 
         decelerationDebugLogger?.log(
             oldestSpeedKmh = oldest.speedKmh,
@@ -48,7 +47,6 @@ class SpeedDecelerationDetector(
         )
 
         if (triggered) {
-            lastTriggerTimeMs = now
             Log.w(TAG, "🚨 [減速検知] 設定秒数(${targetDurationMs}ms)以内の急低下! Drop: ${speedDrop}km/h in ${timeDeltaMs}ms")
             speedHistory.clear()
             onDecelerationDetected()

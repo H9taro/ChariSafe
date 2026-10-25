@@ -15,9 +15,9 @@ class LocationTracker(context: Context) {
 
     companion object {
         private const val TAG = "LocationTracker"
-        // 初期値として東京駅ではなく、システムから取得可能な最新位置（取得できなければ海老名市等の仮リアルタイム座標）を保持
-        var lastValidLatitude: Double = 35.4503f.toDouble() // 海老名市近辺のデフォルト
+        var lastValidLatitude: Double = 35.4503f.toDouble()
         var lastValidLongitude: Double = 139.3929f.toDouble()
+        var lastValidSpeedKmh: Float = 0f
         var lastLocationTimestampMs: Long = 0L
     }
 
@@ -41,6 +41,7 @@ class LocationTracker(context: Context) {
                 _currentLocation.value = point
                 lastValidLatitude = location.latitude
                 lastValidLongitude = location.longitude
+                lastValidSpeedKmh = speedKmh
                 lastLocationTimestampMs = location.time
                 Log.i(TAG, "🟢 FRESH GPS/Network Location updated: lat=${point.latitude}, lon=${point.longitude}, speed=${point.speedKmh} km/h")
             }
@@ -58,7 +59,6 @@ class LocationTracker(context: Context) {
             val minTimeMs = intervalSeconds * 1000L
             val minDistanceMeters = 0f
 
-            // システムから即座に取得できる最も新しい既知の位置（GPS or Network）を初期キャッシュにセット
             val lastKnownGps = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
             val lastKnownNet = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
             val bestLastKnown = when {
@@ -69,6 +69,9 @@ class LocationTracker(context: Context) {
             if (bestLastKnown != null) {
                 lastValidLatitude = bestLastKnown.latitude
                 lastValidLongitude = bestLastKnown.longitude
+                if (bestLastKnown.hasSpeed()) {
+                    lastValidSpeedKmh = bestLastKnown.speed * 3.6f
+                }
                 lastLocationTimestampMs = bestLastKnown.time
                 Log.i(TAG, "Initialized lastValidLocation from system provider: lat=$lastValidLatitude, lon=$lastValidLongitude")
             }

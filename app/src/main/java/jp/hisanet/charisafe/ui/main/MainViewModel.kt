@@ -12,9 +12,10 @@ import jp.hisanet.charisafe.data.debug.DecelerationDebugLogger
 import jp.hisanet.charisafe.domain.model.ActiveCamera
 import jp.hisanet.charisafe.domain.model.AppConfig
 import jp.hisanet.charisafe.domain.model.EventCountSummary
-import jp.hisanet.charisafe.domain.model.EventLog
+import jp.hisanet.charisafe.domain.model.EventDetectionLog
 import jp.hisanet.charisafe.domain.model.EventSensitivity
 import jp.hisanet.charisafe.domain.model.EventType
+import jp.hisanet.charisafe.domain.model.IncidentLog
 import jp.hisanet.charisafe.domain.model.RecordingState
 import jp.hisanet.charisafe.domain.model.RideSummary
 import jp.hisanet.charisafe.domain.model.SystemStatus
@@ -22,7 +23,6 @@ import jp.hisanet.charisafe.domain.repository.ConfigRepository
 import jp.hisanet.charisafe.domain.repository.EventLogRepository
 import jp.hisanet.charisafe.domain.repository.GpxRepository
 import jp.hisanet.charisafe.domain.repository.RecordingRepository
-import jp.hisanet.charisafe.domain.usecase.SaveManualEventUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -30,9 +30,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
-import kotlin.math.acos
 import kotlin.math.cos
 import kotlin.math.sin
+import androidx.core.content.edit
 
 data class MainUiState(
     val config: AppConfig = AppConfig(),
@@ -40,8 +40,9 @@ data class MainUiState(
     val isExporting: Boolean = false,
     val savedEventFiles: List<File> = emptyList(),
     val selectedEventFile: File? = null,
-    val eventLogs: List<EventLog> = emptyList(),
-    val lastEvent: EventLog? = null,
+    val eventDetectionLogs: List<EventDetectionLog> = emptyList(),
+    val incidentLogs: List<IncidentLog> = emptyList(),
+    val lastDetectionLog: EventDetectionLog? = null,
     val eventCounts: EventCountSummary = EventCountSummary(),
     val sensitivity: EventSensitivity = EventSensitivity(),
     val currentRideSummary: RideSummary? = null,
@@ -59,8 +60,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val decelerationDebugLogger = DecelerationDebugLogger(application)
     private val gpxRepository: GpxRepository = GpxRepositoryImpl(application, decelerationDebugLogger)
     private val eventLogRepository: EventLogRepository = EventLogRepositoryImpl(application)
-
-    private val saveManualEventUseCase = SaveManualEventUseCase(recordingRepository, configRepository)
 
     private val prefs = application.getSharedPreferences("charisafe_app_config", android.content.Context.MODE_PRIVATE)
     private val _savedEventFiles = MutableStateFlow<List<File>>(emptyList())
@@ -81,37 +80,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         combine(configRepository.configState, recordingRepository.recordingState, gpxRepository.currentGpxPoint) { cfg, state, gpx ->
             Triple(cfg, state, gpx)
         },
-        combine(_savedEventFiles, _selectedEventFile, eventLogRepository.eventLogs) { files, selected, logs ->
-            Triple(files, selected, logs)
+        combine(_savedEventFiles, _selectedEventFile, eventLogRepository.eventDetectionLogs) { files, selected, detections ->
+            Triple(files, selected, detections)
         },
-        combine(eventLogRepository.lastEvent, _sensitivity, _currentRideSummary) { last, sens, summary ->
-            Triple(last, sens, summary)
-        }
-    ) { p1, p2, p3 ->
+        combine(eventLogRepository.incidentLogs, eventLogRepository.lastDetectionLog, _sensitivity) { incidents, lastDet, sens ->
+            Triple(incidents, lastDet, sens)
+        },
+        _currentRideSummary
+    ) { p1, p2, p3, summary ->
         val config = p1.first
         val state = p1.second
         val gpxPoint = p1.third
 
         val files = p2.first
         val selected = p2.second
-        val logs = p2.third
+        val detections = p2.third
 
-        val last = p3.first
-        val sensitivity = p3.second
-        val summary = p3.third
+        val incidents = p3.first
+        val lastDet = p3.second
+        val sensitivity = p3.third
 
         val status = SystemStatus(
             state = state,
             currentSpeedKmh = gpxPoint?.speedKmh ?: 0f,
             activeGpxFile = gpxRepository.getActiveGpxFilePath(),
-            lastEventFile = last?.videoFilePath ?: files.firstOrNull()?.absolutePath
+            lastEventFile = incidents.firstOrNull()?.videoFilePath ?: files.firstOrNull()?.absolutePath
         )
 
         val counts = EventCountSummary(
-            decelerationCount = logs.count { it.eventType == EventType.DECELERATION },
-            approachCount = logs.count { it.eventType == EventType.APPROACH },
-            collisionCount = logs.count { it.eventType == EventType.COLLISION },
-            soundCount = logs.count { it.eventType == EventType.SOUND }
+            decelerationCount = detections.count { it.eventType == EventType.DECELERATION },
+            approachCount = detections.count { it.eventType == EventType.APPROACH },
+            collisionCount = detections.count { it.eventType == EventType.COLLISION },
+            soundCount = detections.count { it.eventType == EventType.SOUND }
         )
 
         MainUiState(
@@ -120,8 +120,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isExporting = (state == RecordingState.EXPORTING),
             savedEventFiles = files,
             selectedEventFile = selected,
-            eventLogs = logs,
-            lastEvent = last,
+            eventDetectionLogs = detections,
+            incidentLogs = incidents,
+            lastDetectionLog = lastDet,
             eventCounts = counts,
             sensitivity = sensitivity,
             currentRideSummary = summary
@@ -137,7 +138,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val gpxImpl = gpxRepository as? GpxRepositoryImpl
         gpxImpl?.onDecelerationDetected = {
             Log.w(TAG, "🚨 [Priority1] 減速検知トリガー受領")
-            recordEvent(EventType.DECELERATION)
+            val sens = _sensitivity.value.decelerationSensitivity
+            val currentPoint = gpxRepository.currentGpxPoint.value
+            val lat = currentPoint?.latitude ?: jp.hisanet.charisafe.data.location.LocationTracker.lastValidLatitude
+            val lon = currentPoint?.longitude ?: jp.hisanet.charisafe.data.location.LocationTracker.lastValidLongitude
+            val speed = currentPoint?.speedKmh ?: 0f
+
+            val detectionLog = EventDetectionLog(
+                timestampMs = System.currentTimeMillis(),
+                eventType = EventType.DECELERATION,
+                speedKmh = speed,
+                latitude = lat,
+                longitude = lon,
+                sensitivityValue = sens,
+                sensitivityLabel = "減速: ${sens}秒",
+                sensitivitySnapshot = _sensitivity.value
+            )
+            eventLogRepository.addDetectionLog(detectionLog)
+            loadExistingEvents()
         }
 
         viewModelScope.launch {
@@ -148,30 +166,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
-        }
-    }
-
-    fun recordEvent(eventType: EventType, videoFile: File? = null) {
-        viewModelScope.launch {
-            val sens = _sensitivity.value
-            val currentPoint = gpxRepository.currentGpxPoint.value
-
-            val eventFile = videoFile ?: saveManualEventUseCase.execute()
-            val log = EventLog(
-                timestampMs = System.currentTimeMillis(),
-                eventType = eventType,
-                speedKmh = currentPoint?.speedKmh ?: 0f,
-                latitude = currentPoint?.latitude ?: jp.hisanet.charisafe.data.location.LocationTracker.lastValidLatitude,
-                longitude = currentPoint?.longitude ?: jp.hisanet.charisafe.data.location.LocationTracker.lastValidLongitude,
-                decelerationSensitivity = sens.decelerationSensitivity,
-                approachSensitivity = sens.approachSensitivity,
-                collisionSensitivity = sens.collisionSensitivity,
-                soundSensitivity = sens.soundSensitivity,
-                videoFilePath = eventFile?.absolutePath
-            )
-            eventLogRepository.addEvent(log)
-            loadExistingEvents()
-            Log.i(TAG, "Successfully recorded EventLog: ${eventType.displayName} at speed ${log.speedKmh}km/h")
         }
     }
 
@@ -197,7 +191,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         if (config.clearPreviousLogsAndVideosOnStart) {
             Log.w(TAG, "🧹 録画開始時データクリア有効: 過去のEventLogおよび保存動画を消去します")
-            eventLogRepository.clearEvents()
+            eventLogRepository.clearAll()
             try {
                 val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir(getApplication())
                 recordingsDir.listFiles { _, name -> name.startsWith("event_") && name.endsWith(".mp4") }
@@ -218,65 +212,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopRecording() {
         recordingRepository.stopRecording()
         gpxRepository.stopLogging()
-        generateRideSummary()
-    }
 
-    private fun generateRideSummary() {
-        val now = System.currentTimeMillis()
-        val durationSec = if (rideStartTimeMs > 0) (now - rideStartTimeMs) / 1000L else 300L
-        val counts = uiState.value.eventCounts
+        val rideEndTimeMs = System.currentTimeMillis()
+        val totalDurationSec = if (rideStartTimeMs > 0) (rideEndTimeMs - rideStartTimeMs) / 1000L else 0L
 
+        val pointsCopy = synchronized(recordedPoints) { recordedPoints.toList() }
         var totalDistKm = 0.0
         var maxSpd = 0f
         var speedSum = 0f
-        var countSpd = 0
+        var speedCount = 0
 
-        synchronized(recordedPoints) {
-            for (i in 0 until recordedPoints.size - 1) {
-                val p1 = recordedPoints[i]
-                val p2 = recordedPoints[i + 1]
-                val dist = calculateHaversineDistance(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
-                // 異常なGPSジャンプ（1ステップで1km以上など、自転車移動として不自然な数値）を除外して堅牢化
-                if (dist < 1.0) {
-                    totalDistKm += dist
-                }
-            }
-            recordedPoints.forEach { p ->
-                if (p.speedKmh > maxSpd) maxSpd = p.speedKmh
-                speedSum += p.speedKmh
-                countSpd++
-            }
+        for (i in 1 until pointsCopy.size) {
+            val p1 = pointsCopy[i - 1]
+            val p2 = pointsCopy[i]
+            totalDistKm += calculateHaversineDistance(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
+            if (p2.speedKmh > maxSpd) maxSpd = p2.speedKmh
+            speedSum += p2.speedKmh
+            speedCount++
         }
 
-        // 移動していない（0km）場合は厳密に0.0とする
-        if (totalDistKm < 0.005) {
-            totalDistKm = 0.0
-        }
+        val avgSpd = if (speedCount > 0) speedSum / speedCount else 0f
+        val movingSec = if (avgSpd > 1.0f) (totalDistKm / avgSpd * 3600.0).toLong().coerceAtMost(totalDurationSec) else 0L
+        val stoppedSec = (totalDurationSec - movingSec).coerceAtLeast(0L)
 
-        val avgSpd = if (countSpd > 0) speedSum / countSpd else 0f
-        val hours = durationSec / 3600.0f
+        val hours = if (totalDurationSec > 0) totalDurationSec / 3600.0 else 1.0
+        val counts = uiState.value.eventCounts
 
         val summary = RideSummary(
-            startTimeMs = if (rideStartTimeMs > 0) rideStartTimeMs else now - durationSec * 1000L,
-            endTimeMs = now,
-            movingTimeSec = (durationSec * 0.85).toLong(),
-            stoppedTimeSec = (durationSec * 0.15).toLong(),
+            startTimeMs = rideStartTimeMs,
+            endTimeMs = rideEndTimeMs,
+            movingTimeSec = movingSec,
+            stoppedTimeSec = stoppedSec,
             totalDistanceKm = totalDistKm,
             averageSpeedKmh = avgSpd,
             maxSpeedKmh = maxSpd,
             eventCounts = counts,
-            // 順序統一: 減速, 接近, 衝撃, 音量
-            decelerationPerKm = if (totalDistKm > 0) counts.decelerationCount / totalDistKm.toFloat() else 0f,
-            decelerationPerHour = counts.decelerationCount / hours,
-            approachPerKm = if (totalDistKm > 0) counts.approachCount / totalDistKm.toFloat() else 0f,
-            approachPerHour = counts.approachCount / hours,
-            collisionPerKm = if (totalDistKm > 0) counts.collisionCount / totalDistKm.toFloat() else 0f,
-            collisionPerHour = counts.collisionCount / hours,
-            soundPerKm = if (totalDistKm > 0) counts.soundCount / totalDistKm.toFloat() else 0f,
-            soundPerHour = counts.soundCount / hours
+            decelerationPerKm = if (totalDistKm > 0.0) counts.decelerationCount.toFloat() / totalDistKm.toFloat() else 0f,
+            decelerationPerHour = (counts.decelerationCount.toFloat() / hours).toFloat(),
+            approachPerKm = if (totalDistKm > 0.0) counts.approachCount.toFloat() / totalDistKm.toFloat() else 0f,
+            approachPerHour = (counts.approachCount.toFloat() / hours).toFloat(),
+            collisionPerKm = if (totalDistKm > 0.0) counts.collisionCount.toFloat() / totalDistKm.toFloat() else 0f,
+            collisionPerHour = (counts.collisionCount.toFloat() / hours).toFloat(),
+            soundPerKm = if (totalDistKm > 0.0) counts.soundCount.toFloat() / totalDistKm.toFloat() else 0f,
+            soundPerHour = (counts.soundCount.toFloat() / hours).toFloat()
         )
+
         _currentRideSummary.value = summary
-        Log.i(TAG, "Generated RideSummary: dist=${totalDistKm}km, movingTime=${summary.movingTimeSec}s")
+        loadExistingEvents()
+        Log.i(TAG, "Ride ended. Distance: $totalDistKm km, Duration: $totalDurationSec sec")
     }
 
     private fun calculateHaversineDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
@@ -286,7 +269,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val a = sin(dLat / 2) * sin(dLat / 2) +
                 cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
                 sin(dLon / 2) * sin(dLon / 2)
-        val c = 2 * acos(kotlin.math.sqrt(a))
+        // 浮動小数点誤差による a > 1.0 での acos(NaN) を防止するため coerceIn および asin を採用
+        val c = 2 * kotlin.math.asin(kotlin.math.sqrt(a.coerceIn(0.0, 1.0)))
         return r * c
     }
 
@@ -312,11 +296,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateSensitivity(sensitivity: EventSensitivity) {
         _sensitivity.value = sensitivity
-        prefs.edit().putFloat("key_decel_sensitivity", sensitivity.decelerationSensitivity)
-            .putFloat("key_approach_sensitivity", sensitivity.approachSensitivity)
-            .putFloat("key_collision_sensitivity", sensitivity.collisionSensitivity)
-            .putFloat("key_sound_sensitivity", sensitivity.soundSensitivity)
-            .apply()
+        prefs.edit {
+            putFloat("key_decel_sensitivity", sensitivity.decelerationSensitivity)
+                .putFloat("key_approach_sensitivity", sensitivity.approachSensitivity)
+                .putFloat("key_collision_sensitivity", sensitivity.collisionSensitivity)
+                .putFloat("key_sound_sensitivity", sensitivity.soundSensitivity)
+        }
     }
 
     fun updateClearPreviousData(clear: Boolean) {

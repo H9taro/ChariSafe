@@ -55,7 +55,6 @@ class AudioImpactDetector(
 
             listeningThread = Thread {
                 val buffer = ShortArray(bufferSize / 2)
-                var lastTriggerTime = 0L
 
                 while (isListening) {
                     val readSize = audioRecord?.read(buffer, 0, buffer.size) ?: 0
@@ -72,8 +71,7 @@ class AudioImpactDetector(
                         val currentAmplitudeSetting = getSoundSensitivityAmplitude().coerceIn(1000f, 32767f)
                         val thresholdAmplitude = currentAmplitudeSetting.toInt().coerceIn(1000, 32767)
 
-                        val now = System.currentTimeMillis()
-                        val triggered = maxAmplitude >= thresholdAmplitude && now - lastTriggerTime > 15000L
+                        val triggered = maxAmplitude >= thresholdAmplitude
 
                         audioDebugLogger?.log(
                             maxAmplitude = maxAmplitude,
@@ -83,7 +81,6 @@ class AudioImpactDetector(
                         )
 
                         if (triggered) {
-                            lastTriggerTime = now
                             Log.w(TAG, "💥 [AudioImpact] 大音量検知! Amp: $maxAmplitude (Threshold: $thresholdAmplitude)")
                             onLoudSoundDetected()
                         }
