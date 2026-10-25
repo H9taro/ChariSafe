@@ -151,7 +151,10 @@ class RecordingService : Service(), LifecycleOwner {
             triggerAutoEventWithAlert("衝撃")
         }
 
-        audioImpactDetector = AudioImpactDetector({ 85.0f }) {
+        audioImpactDetector = AudioImpactDetector({
+            val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
+            prefs.getFloat("key_sound_sensitivity", 5000.0f)
+        }) {
             Log.w(TAG, "💥 [AudioImpact] 音量検知トリガー受領 -> 警告音＋自動イベント保存を実行します")
             triggerAutoEventWithAlert("音量")
         }
@@ -451,16 +454,22 @@ class RecordingService : Service(), LifecycleOwner {
                     "SOUND" -> EventType.SOUND
                     else -> EventType.APPROACH
                 }
+                val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
+                val decelSens = prefs.getFloat("key_decel_sensitivity", 1.5f)
+                val approachSens = prefs.getFloat("key_approach_sensitivity", 0.7f)
+                val collisionSens = prefs.getFloat("key_collision_sensitivity", 3.0f)
+                val soundSens = prefs.getFloat("key_sound_sensitivity", 5000.0f)
+
                 val newLog = EventLog(
                     timestampMs = System.currentTimeMillis(),
                     eventType = eventType,
-                    speedKmh = 20.0f,
+                    speedKmh = 0.0f,
                     latitude = lat,
                     longitude = lon,
-                    decelerationSensitivity = 1.5f,
-                    approachSensitivity = 0.7f,
-                    collisionSensitivity = 3.0f,
-                    soundSensitivity = 85.0f,
+                    decelerationSensitivity = decelSens,
+                    approachSensitivity = approachSens,
+                    collisionSensitivity = collisionSens,
+                    soundSensitivity = soundSens,
                     videoFilePath = eventFile.absolutePath
                 )
                 val existingLogs = EventLogStore.loadEvents(this@RecordingService).toMutableList()

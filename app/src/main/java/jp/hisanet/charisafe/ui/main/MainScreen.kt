@@ -9,7 +9,6 @@ import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -266,6 +265,12 @@ fun MainScreen(
         // 2. 最後のイベントカード
         if (uiState.lastEvent != null) {
             val last = uiState.lastEvent!!
+            val sensitivityText = when (last.eventType) {
+                EventType.DECELERATION -> "感度: ${last.decelerationSensitivity}秒"
+                EventType.APPROACH -> "感度: ${(last.approachSensitivity * 100).toInt()}%"
+                EventType.COLLISION -> "感度: ${last.collisionSensitivity}G"
+                EventType.SOUND -> "感度: ${last.soundSensitivity.toInt()}"
+            }
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
                 modifier = Modifier.fillMaxWidth()
@@ -274,7 +279,7 @@ fun MainScreen(
                     Text(text = "🚨 最後のイベント検知", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.onTertiaryContainer)
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "${last.eventType.emoji} ${last.eventType.displayName} (速度: ${last.speedKmh}km/h)",
+                        text = "${last.eventType.emoji} ${last.eventType.displayName} ($sensitivityText)",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onTertiaryContainer
@@ -315,13 +320,12 @@ fun MainScreen(
                     steps = 15
                 )
 
-                // 大音量検知 (dB)
-                Text(text = "音量感度: ${uiState.sensitivity.soundSensitivity.toInt()} dB", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                // 大音量検知 (振幅値)
+                Text(text = "音量感度: ${uiState.sensitivity.soundSensitivity.toInt()}", fontSize = 11.sp, fontWeight = FontWeight.Medium)
                 Slider(
                     value = uiState.sensitivity.soundSensitivity,
                     onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(soundSensitivity = it)) },
-                    valueRange = 70f..100f,
-                    steps = 30
+                    valueRange = 1000f..32767f
                 )
             }
         }
@@ -397,15 +401,36 @@ fun MainScreen(
                     Text(text = "イベントフィルタ", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    EventFilterBadge("全(${uiState.eventLogs.size})", isSelected = selectedFilterType == null) { selectedFilterType = null }
-                    EventFilterBadge("⚠ 減速(${uiState.eventCounts.decelerationCount})", isSelected = selectedFilterType == EventType.DECELERATION) { selectedFilterType = EventType.DECELERATION }
-                    EventFilterBadge("🚗 接近(${uiState.eventCounts.approachCount})", isSelected = selectedFilterType == EventType.APPROACH) { selectedFilterType = EventType.APPROACH }
-                    EventFilterBadge("💥 衝撃(${uiState.eventCounts.collisionCount})", isSelected = selectedFilterType == EventType.COLLISION) { selectedFilterType = EventType.COLLISION }
-                    EventFilterBadge("🔊 音量(${uiState.eventCounts.soundCount})", isSelected = selectedFilterType == EventType.SOUND) { selectedFilterType = EventType.SOUND }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            EventFilterBadge("全(${uiState.eventLogs.size})", isSelected = selectedFilterType == null) { selectedFilterType = null }
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            EventFilterBadge("⚠ 減速(${uiState.eventCounts.decelerationCount})", isSelected = selectedFilterType == EventType.DECELERATION) { selectedFilterType = EventType.DECELERATION }
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            EventFilterBadge("🚗 接近(${uiState.eventCounts.approachCount})", isSelected = selectedFilterType == EventType.APPROACH) { selectedFilterType = EventType.APPROACH }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            EventFilterBadge("💥 衝撃(${uiState.eventCounts.collisionCount})", isSelected = selectedFilterType == EventType.COLLISION) { selectedFilterType = EventType.COLLISION }
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            EventFilterBadge("🔊 音量(${uiState.eventCounts.soundCount})", isSelected = selectedFilterType == EventType.SOUND) { selectedFilterType = EventType.SOUND }
+                        }
+                        Box(modifier = Modifier.weight(1f)) {}
+                    }
                 }
             }
         }
@@ -428,15 +453,15 @@ fun MainScreen(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
+                            val sensitivityText = when (log.eventType) {
+                                EventType.DECELERATION -> "感度: ${log.decelerationSensitivity}秒"
+                                EventType.APPROACH -> "感度: ${(log.approachSensitivity * 100).toInt()}%"
+                                EventType.COLLISION -> "感度: ${log.collisionSensitivity}G"
+                                EventType.SOUND -> "感度: ${log.soundSensitivity.toInt()}"
+                            }
                             Text(text = "${log.eventType.emoji} ${log.eventType.displayName}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             Text(text = "時刻: ${SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US).format(Date(log.timestampMs))}", fontSize = 11.sp, color = Color.Gray)
-                            Text(text = "速度: ${log.speedKmh} km/h", fontSize = 11.sp)
-                            // 【NEW】イベント発生時の感度設定値を表示
-                            Text(
-                                text = "感度 ➔ 減速: ${log.decelerationSensitivity}秒, 接近: ${(log.approachSensitivity * 100).toInt()}%, 衝撃: ${log.collisionSensitivity}G, 音量: ${log.soundSensitivity.toInt()}dB",
-                                fontSize = 10.sp,
-                                color = Color.DarkGray
-                            )
+                            Text(text = sensitivityText, fontSize = 11.sp, color = Color.DarkGray)
 
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(
@@ -565,11 +590,12 @@ fun EventFilterBadge(label: String, isSelected: Boolean, onClick: () -> Unit) {
         colors = ButtonDefaults.outlinedButtonColors(
             containerColor = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
         ),
-        modifier = Modifier.height(32.dp).padding(horizontal = 2.dp)
+        modifier = Modifier.height(32.dp).fillMaxWidth()
     ) {
         Text(
             text = label,
             fontSize = 11.sp,
+            maxLines = 1,
             color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSecondaryContainer
         )
     }

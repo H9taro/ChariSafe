@@ -8,7 +8,7 @@ import android.util.Log
 import kotlin.math.abs
 
 class AudioImpactDetector(
-    private val getSoundSensitivityDb: () -> Float, // ユーザー設定の dB 値 (例: 70dB〜100dB, デフォルト85dB)
+    private val getSoundSensitivityAmplitude: () -> Float, // ユーザー設定の振幅値 (例: 1000〜32767, デフォルト5000)
     private val onLoudSoundDetected: () -> Unit
 ) {
     companion object {
@@ -64,23 +64,21 @@ class AudioImpactDetector(
                             }
                         }
 
-                        // ユーザー設定の dB 値をリニア振幅閾値に変換 (例: 70dB=敏感, 100dB=鈍感)
-                        // dBから振幅への簡易換算: 100dBを最高値(32767)とし、設定dBに応じた閾値を算出
-                        val currentDbSetting = getSoundSensitivityDb().coerceIn(70f, 100f)
-                        // 設定dBが低いほど少ない音量(低い振幅)で検知する (例: 70dB設定なら約1000の振幅で反応)
-                        val thresholdAmplitude = (32767.0 * (currentDbSetting - 60.0) / 40.0).toInt().coerceIn(500, 32000)
+                        // ユーザー設定の振幅値 (最小: 1000、最大: マイク最大振幅値32767)
+                        val currentAmplitudeSetting = getSoundSensitivityAmplitude().coerceIn(1000f, 32767f)
+                        val thresholdAmplitude = currentAmplitudeSetting.toInt().coerceIn(1000, 32767)
 
                         val now = System.currentTimeMillis()
                         if (maxAmplitude >= thresholdAmplitude && now - lastTriggerTime > 15000L) { // クールダウン15秒
                             lastTriggerTime = now
-                            Log.w(TAG, "💥 [AudioImpact] 大音量検知! Amp: $maxAmplitude (Threshold: $thresholdAmplitude for ${currentDbSetting}dB)")
+                            Log.w(TAG, "💥 [AudioImpact] 大音量検知! Amp: $maxAmplitude (Threshold: $thresholdAmplitude)")
                             onLoudSoundDetected()
                         }
                     }
                 }
             }.apply { start() }
 
-            Log.i(TAG, "Started listening to microphone audio with dynamic dB sensitivity")
+            Log.i(TAG, "Started listening to microphone audio with amplitude sensitivity")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start AudioImpactDetector", e)
         }

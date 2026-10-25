@@ -60,9 +60,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val saveManualEventUseCase = SaveManualEventUseCase(recordingRepository, configRepository)
 
+    private val prefs = application.getSharedPreferences("charisafe_app_config", android.content.Context.MODE_PRIVATE)
     private val _savedEventFiles = MutableStateFlow<List<File>>(emptyList())
     private val _selectedEventFile = MutableStateFlow<File?>(null)
-    private val _sensitivity = MutableStateFlow(EventSensitivity())
+    private val _sensitivity = MutableStateFlow(
+        EventSensitivity(
+            decelerationSensitivity = prefs.getFloat("key_decel_sensitivity", 1.5f),
+            approachSensitivity = prefs.getFloat("key_approach_sensitivity", 0.7f),
+            collisionSensitivity = prefs.getFloat("key_collision_sensitivity", 3.0f),
+            soundSensitivity = prefs.getFloat("key_sound_sensitivity", 5000.0f)
+        )
+    )
     private val _currentRideSummary = MutableStateFlow<RideSummary?>(null)
     private var rideStartTimeMs: Long = 0L
     private val recordedPoints = mutableListOf<jp.hisanet.charisafe.domain.model.GpxPoint>()
@@ -302,6 +310,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateSensitivity(sensitivity: EventSensitivity) {
         _sensitivity.value = sensitivity
+        prefs.edit().putFloat("key_decel_sensitivity", sensitivity.decelerationSensitivity)
+            .putFloat("key_approach_sensitivity", sensitivity.approachSensitivity)
+            .putFloat("key_collision_sensitivity", sensitivity.collisionSensitivity)
+            .putFloat("key_sound_sensitivity", sensitivity.soundSensitivity)
+            .apply()
     }
 
     fun updateClearPreviousData(clear: Boolean) {

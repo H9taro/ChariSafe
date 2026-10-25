@@ -82,7 +82,7 @@ object EventLogStore {
                     decelerationSensitivity = obj.optDouble("decelerationSensitivity", 1.5).toFloat(),
                     approachSensitivity = obj.optDouble("approachSensitivity", 0.7).toFloat(),
                     collisionSensitivity = obj.optDouble("collisionSensitivity", 3.0).toFloat(),
-                    soundSensitivity = obj.optDouble("soundSensitivity", 85.0).toFloat(),
+                    soundSensitivity = obj.optDouble("soundSensitivity", 5000.0).toFloat(),
                     videoFilePath = obj.optString("videoFilePath", "").takeIf { it.isNotEmpty() }
                 )
                 list.add(log)

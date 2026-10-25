@@ -19,7 +19,7 @@ data class EventLog(
     val decelerationSensitivity: Float, // 秒数 (例: 1.5秒)
     val approachSensitivity: Float,     // 接近検知 (例: 70%)
     val collisionSensitivity: Float,    // 衝撃 (例: 3.0G)
-    val soundSensitivity: Float,        // 音量 (例: 85 dB)
+    val soundSensitivity: Float,        // 音量振幅 (例: 5000)
     val videoFilePath: String? = null
 )
 
@@ -34,7 +34,7 @@ data class EventSensitivity(
     val decelerationSensitivity: Float = 1.5f,  // 減速までの秒数 (左=敏感 0.5s 〜 右=鈍感 3.0s)
     val approachSensitivity: Float = 0.7f,      // 接近検知 (左=敏感 30% 〜 右=鈍感 100%)
     val collisionSensitivity: Float = 3.0f,     // 衝撃 G (左=敏感 2.0G 〜 右=鈍感 5.0G)
-    val soundSensitivity: Float = 85.0f         // 音量 dB (左=敏感 70dB 〜 右=鈍感 100dB)
+    val soundSensitivity: Float = 5000.0f       // 音量振幅 (左=敏感 1000 〜 右=鈍感 32767)
 )
 
 data class RideSummary(
