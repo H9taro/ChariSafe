@@ -111,6 +111,7 @@ class RecordingService : Service(), LifecycleOwner {
     private var approachDebugLogger: ApproachDebugLogger? = null
     private var audioDebugLogger: AudioDebugLogger? = null
     private var collisionDebugLogger: CollisionDebugLogger? = null
+    private var recordingStartTimeMs: Long = 0L
 
     private var activeCamera: ActiveCamera = ActiveCamera.REAR
     private var ringBufferMinutes: Int = 5
@@ -191,6 +192,7 @@ class RecordingService : Service(), LifecycleOwner {
 
         when (action) {
             ACTION_START_RECORDING -> {
+                recordingStartTimeMs = System.currentTimeMillis()
                 startForegroundWithNotification()
                 acquireWakeLock()
                 pocketStorageDetector?.startListening()
@@ -394,6 +396,12 @@ class RecordingService : Service(), LifecycleOwner {
     }
 
     fun triggerAutoEventWithAlert(reason: String) {
+        val now = System.currentTimeMillis()
+        if (now - recordingStartTimeMs < 3000L) {
+            Log.i(TAG, "⏳ 録画開始直後（ウォームアップ期間3秒）のため、[$reason] による自動イベント発火をスキップします")
+            return
+        }
+
         try {
             toneGenerator.startTone(ToneGenerator.TONE_DTMF_S, 800)
             Log.i(TAG, "🔊 警告音鳴動 ($reason)")
