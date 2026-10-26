@@ -34,25 +34,18 @@
 ## 2. 新方式（リングバッファセグメント保護）のコア仕様
 
 ### 2.1 録画ノンストップ＆動画取り逃しゼロ保証
-- **従来（MP4結合方式）の課題**: イベント発生時に進行中の録画を `.stop()` して再開するため、約500ms〜2秒間の録画空白（フレーム欠落）が発生していた。
-- **新方式の仕様**:
-  - `RecordingService` でのカメラ録画は**一切停止させず継続**する。
-  - イベント発生時刻をカバーするリングバッファセグメント（現在録画中のセグメントおよび直前のセグメント）のファイルパスを保護対象（削除除外）としてマーク／保護ディレクトリ（`recordings/`）にコピー移動する。
-  - 動画取り逃し（ギャップ時間）は**完全に 0ms** となる。
+- `RecordingService` でのカメラ録画は**一切停止させず継続**する。
+- イベント発生時刻をカバーするリングバッファセグメント（現在録画中のセグメントおよび直前のセグメント）のファイルパスを保護対象（削除除外）としてマーク／保護ディレクトリ（`recordings/`）にコピー移動する。
+- 動画取り逃し（ギャップ時間）は**完全に 0ms** となる。
 
-### 2.2 EventCoordinator による自動紐付け ＆ 重複保護抑止
-- **連続多発イベント対応**:
-  - 連鎖イベント（例: 「接近 ➔ 減速 ➔ 衝撃 ➔ 音量」）が発生した際、`EventCoordinator` が同一セグメントに対する重複保護処理を抑止しつつ、関連するすべての `EventDetectionLog` の ID を `relatedDetectionIds` に記録する。
-  - 最高危険度（`highestSeverityType`: 衝撃 > 減速 > 音量 > 接近）を自動判定・保持する。
+### 2.2 UI 設計における重要方針：フラットな時系列リスト表示 (階層構造の廃止)
+- **従来案（ネスト・階層構造）の廃止**: 動画記録とイベント検知を親子関係（ネスト）で表示するのではなく、**時系列でフラットな1つのリスト**として一元的に表示する。
+- **降順ソート（最新が一番上）**: 常に最新のイベントや記録セグメントがリストの最上部に表示される（`sortedByDescending { it.timestampMs }`）。
+- **「最後のイベント検知」セクションの廃止**: 最新のイベントがリストの一番上に自然に表示されるため、常時表示エリアにあった「最後のイベント検知」専用セクションは廃止する。
 
 ### 2.3 状態管理 (`IncidentStatus`)
 - `enum class IncidentStatus { PENDING, SUCCESS, FAILED }`
 - セグメント保護開始時に `PENDING` で `IncidentLog` を作成。ファイル保護およびメディアスキャン完了時に `SUCCESS`、ファイルアクセス失敗等で `FAILED` へ更新する。
-
-### 2.4 EventDetectionLog の感度記録スキーマ (補完型構造)
-- `sensitivityValue: Float` (生数値)
-- `sensitivityLabel: String` (表示用フォーマット文字列: `"感度: 70%"`, `"1.5秒"`, `"3.0G"`, `"振幅: 5000"`)
-- `sensitivitySnapshot: EventSensitivity` (検知時点の全感度設定スナップショット)
 
 ---
 
@@ -79,10 +72,10 @@ enum class IncidentStatus { PENDING, SUCCESS, FAILED }
 data class IncidentLog(
     val id: String = UUID.randomUUID().toString(),
     val timestampMs: Long = System.currentTimeMillis(),
-    val triggerEventType: EventType,                     // トリガーとなった最初のイベント
+    val triggerEventType: EventType,                     
     val triggerDetectionLogId: String,
-    val relatedDetectionIds: List<String> = emptyList(), // 同一セグメント期間中に起きた全 EventDetectionLog ID
-    val highestSeverityType: EventType = triggerEventType, // 最重要（最高危険度）イベントタイプ
+    val relatedDetectionIds: List<String> = emptyList(), 
+    val highestSeverityType: EventType = triggerEventType, 
     val latitude: Double,
     val longitude: Double,
     var coveredSegmentFiles: List<String> = emptyList(), // カバーする保護動画セグメントファイルパス一覧
@@ -93,35 +86,15 @@ data class IncidentLog(
 
 ---
 
-## 4. 統合タイムライン UI 仕様 (`MainScreen.kt`)
+## 4. フラット時系列タイムライン UI 仕様 (`MainScreen.kt`)
 
-ユーザーは「走行ログ タイムライン」画面において、保護された録画セグメントと発生イベントが一体化されたネスト時系列で直感的に確認・再生できる。
+ユーザーは「走行ログ タイムライン」画面において、保護された録画セグメント（ファイル記録）と各センサー検知イベントが**フラットな時系列（最新が最上部）**で並んだリストを確認できる。
 
-```text
-┌────────────────────────────────────────────────────────────────────────┐
-│ 🎥 08:10:00 録画セグメント #1 [▶ 再生] [📤 共有] [🔒 保護済]          │
-│ │   ├─ 08:10:10 ⚠ 減速 (減速: 1.5秒 / 22km/h)                        │
-│ │   └─ 08:10:11 🔊 音量 (振幅: 2,400)                                │
-│ │                                                                      │
-│ 🎥 08:13:00 録画セグメント #2 [▶ 再生] [📤 共有] [🔒 保護済]          │
-│ │   ├─ 08:15:10 🚗 接近 (感度: 70% / 18km/h)                        │
-│ │   └─ 08:15:14 💥 衝撃 (衝撃: 3.8G) [最重要]                         │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 5. 修正対象クラス一覧
-
-1. **`domain/model/EventLog.kt`**: `EventType` (`減速`, `接近`, `衝撃`, `音量`), `EventDetectionLog`, `IncidentLog` (`coveredSegmentFiles`), `IncidentStatus` の定義
-2. **`data/local/ringbuffer/RingBufferManager.kt`**: セグメント保護（コピー／保護マーク／パージ除外）機能の追加
-3. **`data/service/EventCoordinator.kt`**: 重複保護抑止および関連イベント紐付けの調停
-4. **`data/local/EventDetectionLogStore.kt`**: 全検知ログの永続化
-5. **`data/local/IncidentLogStore.kt`**: 保護インシデントの永続化
-6. **`data/service/RecordingService.kt`**: ノンストップ録画 ＆ セグメント保護呼び出し
-7. **`data/camera/RearApproachDetector.kt`**: クールダウン撤廃、即時通知化
-8. **`data/sensor/CollisionDropDetector.kt`**: クールダウン撤廃、即時通知化
-9. **`data/sensor/AudioImpactDetector.kt`**: クールダウン撤廃、即時通知化
-10. **`data/location/SpeedDecelerationDetector.kt`**: 即時通知化
-11. **`ui/main/MainViewModel.kt`**: 2系統ログの保持、統合タイムラインデータ生成
-12. **`ui/main/MainScreen.kt`**: セグメントとイベントが統合されたタイムライン UI 描画
+### フラット時系列イメージ（降順）
+- **2026-10-26 08:16:00** 🎥 記録セグメント保護完了 [再生] [共有] [🔒保護済]
+- **2026-10-26 08:15:14** 🔊 音量 (振幅: 2,400)
+- **2026-10-26 08:15:10** ⚠ 減速 (1.5秒 / 22km/h)
+- **2026-10-26 08:13:00** 🎥 記録セグメント保護完了 [再生] [共有] [🔒保護済]
+- **2026-10-26 08:10:11** 🔊 音量 (振幅: 2,400)
+- **2026-10-26 08:10:10** ⚠ 減速 (1.5秒 / 22km/h)
+- **2026-10-26 08:10:00** 🎥 記録セグメント保護完了 [再生] [共有] [🔒保護済]
