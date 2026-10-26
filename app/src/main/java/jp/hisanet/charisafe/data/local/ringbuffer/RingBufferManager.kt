@@ -30,7 +30,7 @@ class RingBufferManager(private val context: Context, private val ringBufferMinu
                 ?.sortedBy { it.lastModified() }
                 ?: return
 
-            val maxFiles = ringBufferMinutes.coerceAtLeast(1) + 1
+            val maxFiles = ringBufferMinutes.coerceAtLeast(1) + 2
             if (files.size > maxFiles) {
                 val excess = files.size - maxFiles
                 for (i in 0 until excess) {
@@ -47,8 +47,9 @@ class RingBufferManager(private val context: Context, private val ringBufferMinu
     }
 
     /**
-     * イベント発生時に、直近のセグメントファイル（現行セグメントおよび直前セグメント）を
-     * パブリックな録画保存ディレクトリ（recordings/）へコピーして保護する。
+     * イベント発生時に、すでに書き込みとファイナライズ（クローズ）が完了している
+     * 「過去の完了済みセグメントファイル（最新1〜2本）」のみを安全に抽出して保護する。
+     * ※ 現在書き込み中のファイルは絶対に対象外（コピーしない）とする。
      */
     fun protectSegmentsForEvent(currentSegmentPath: String): List<String> {
         val dir = FileUtils.getRingBufferDir(context)
@@ -56,40 +57,31 @@ class RingBufferManager(private val context: Context, private val ringBufferMinu
         val protectedPaths = mutableListOf<String>()
 
         try {
+            val currentFile = File(currentSegmentPath)
+
+            // ディレクトリから .mp4 ファイルを取得し、現在書き込み中のファイルは絶対除外する
             val files = dir.listFiles { _, name -> name.startsWith("seg_") && name.endsWith(".mp4") }
-                ?.filter { it.exists() && it.length() > 50 * 1024 }
+                ?.filter { file ->
+                    file.exists() && 
+                    file.length() > 50 * 1024 && 
+                    file.absolutePath != currentFile.absolutePath
+                }
                 ?.sortedBy { it.lastModified() }
                 ?: emptyList()
 
-            if (files.isEmpty()) {
-                val currentFile = File(currentSegmentPath)
-                if (currentFile.exists() && currentFile.length() > 0) {
-                    val destFile = File(recordingsDir, currentFile.name)
-                    currentFile.copyTo(destFile, overwrite = true)
-                    protectedPaths.add(destFile.absolutePath)
-                }
-                return protectedPaths
-            }
+            // 完全に完了した直近の過去セグメント（最大2本）のみを抽出
+            val completedSegments = files.takeLast(2)
 
-            // 直近の最大2セグメント（直前セグメント ＋ 現行セグメント）を対象とする
-            val targetSegments = files.takeLast(2)
-            val currentFile = File(currentSegmentPath)
-            val finalSegments = if (currentFile.exists() && currentFile.length() > 0 && !targetSegments.contains(currentFile)) {
-                targetSegments + currentFile
-            } else {
-                targetSegments
-            }
-
-            for (seg in finalSegments) {
+            for (seg in completedSegments) {
                 if (seg.exists() && seg.length() > 0) {
                     val destFile = File(recordingsDir, seg.name)
                     seg.copyTo(destFile, overwrite = true)
                     protectedPaths.add(destFile.absolutePath)
-                    Log.i(TAG, "Protected ring buffer segment: ${destFile.absolutePath}")
+                    Log.i(TAG, "Protected completed ring buffer segment: ${destFile.absolutePath} (size: ${seg.length()})")
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to protect segments for event", e)
+            Log.e(TAG, "Failed to protect completed segments for event", e)
         }
 
         return protectedPaths

@@ -40,19 +40,20 @@ import androidx.lifecycle.LifecycleRegistry
 import jp.hisanet.charisafe.MainActivity
 import jp.hisanet.charisafe.R
 import jp.hisanet.charisafe.data.camera.RearApproachDetector
+import jp.hisanet.charisafe.data.config.ConfigRepositoryImpl
 import jp.hisanet.charisafe.data.debug.ApproachDebugLogger
 import jp.hisanet.charisafe.data.debug.AudioDebugLogger
 import jp.hisanet.charisafe.data.debug.CollisionDebugLogger
 import jp.hisanet.charisafe.data.debug.DebugLogCleanupManager
 import jp.hisanet.charisafe.data.local.EventDetectionLogStore
 import jp.hisanet.charisafe.data.local.IncidentLogStore
-
 import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
 import jp.hisanet.charisafe.data.location.LocationTracker
 import jp.hisanet.charisafe.data.sensor.AudioImpactDetector
 import jp.hisanet.charisafe.data.sensor.CollisionDropDetector
 import jp.hisanet.charisafe.data.sensor.PocketStorageDetector
 import jp.hisanet.charisafe.domain.model.*
+import jp.hisanet.charisafe.domain.repository.ConfigRepository
 import jp.hisanet.charisafe.poc.PocMetricsLogger
 import jp.hisanet.charisafe.util.FileUtils
 import kotlinx.coroutines.CoroutineScope
@@ -60,6 +61,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -113,6 +115,7 @@ class RecordingService : Service(), LifecycleOwner {
     private var recordingStartTimeMs: Long = 0L
 
     private val eventCoordinator = EventCoordinator()
+    private val configRepository: ConfigRepository by lazy { ConfigRepositoryImpl(this) }
 
     private var activeCamera: ActiveCamera = ActiveCamera.REAR
     private var ringBufferMinutes: Int = 5
@@ -124,11 +127,21 @@ class RecordingService : Service(), LifecycleOwner {
 
     private var metricsLogger: PocMetricsLogger? = null
     private var metricsJob: Job? = null
+    private var rotationJob: Job? = null
 
     private val analysisExecutor = Executors.newSingleThreadExecutor()
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
 
     private val _serviceState = MutableStateFlow(ServiceState())
+
+    private data class IncidentWindow(
+        val incidentId: String,
+        val targetSegmentPaths: MutableSet<String>,
+        val relatedDetectionIds: MutableList<String>,
+        var highestSeverityType: EventType
+    )
+
+    private val activeIncidentWindows = java.util.Collections.synchronizedMap(mutableMapOf<String, IncidentWindow>())
 
     inner class LocalBinder : Binder() {
         fun getService(): RecordingService = this@RecordingService
@@ -180,14 +193,19 @@ class RecordingService : Service(), LifecycleOwner {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
-        val camName = intent?.getStringExtra(EXTRA_ACTIVE_CAMERA) ?: ActiveCamera.REAR.name
-        activeCamera = ActiveCamera.valueOf(camName)
-        ringBufferMinutes = intent?.getIntExtra(EXTRA_RING_BUFFER_MINUTES, 5) ?: 5
-        targetFps = intent?.getIntExtra(EXTRA_TARGET_FPS, 10) ?: 10
+        if (action == null) {
+            Log.w(TAG, "onStartCommand received null action, ignoring to prevent redelivery bugs")
+            return START_NOT_STICKY
+        }
+
+        // 設定リポジトリの最新値を正としてカメラ選択を確実に同期
+        activeCamera = configRepository.getConfig().activeCamera
+        ringBufferMinutes = intent.getIntExtra(EXTRA_RING_BUFFER_MINUTES, 5)
+        targetFps = intent.getIntExtra(EXTRA_TARGET_FPS, 10)
         userConfigFps = targetFps
-        resWidth = intent?.getIntExtra(EXTRA_RESOLUTION_WIDTH, 1280) ?: 1280
-        resHeight = intent?.getIntExtra(EXTRA_RESOLUTION_HEIGHT, 720) ?: 720
-        audioEnabled = intent?.getBooleanExtra(EXTRA_AUDIO_ENABLED, true) ?: true
+        resWidth = intent.getIntExtra(EXTRA_RESOLUTION_WIDTH, 1280)
+        resHeight = intent.getIntExtra(EXTRA_RESOLUTION_HEIGHT, 720)
+        audioEnabled = intent.getBooleanExtra(EXTRA_AUDIO_ENABLED, true)
 
         ringBufferManager = RingBufferManager(this, ringBufferMinutes)
 
@@ -202,6 +220,7 @@ class RecordingService : Service(), LifecycleOwner {
                 collisionDropDetector?.startListening()
                 audioImpactDetector?.startListening()
                 startRecordingPipeline()
+                startSegmentRotationTimer()
             }
             ACTION_STOP_RECORDING -> {
                 pocketStorageDetector?.stopListening()
@@ -211,11 +230,32 @@ class RecordingService : Service(), LifecycleOwner {
                 stopForegroundAndSelf()
             }
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder {
         return binder
+    }
+
+    private fun startSegmentRotationTimer() {
+        rotationJob?.cancel()
+        rotationJob = serviceScope.launch(Dispatchers.IO) {
+            while (true) {
+                delay(60_000L) // 60秒 (1分) ごとにセグメント切替
+                if (_serviceState.value.isRecording) {
+                    Log.i(TAG, "⏱️ 1分経過したため、リングバッファセグメントを自動ローテーション（切替）します")
+                    withContext(Dispatchers.Main) {
+                        activeRecording?.stop()
+                        activeRecording = null
+                    }
+                }
+            }
+        }
+    }
+
+    private fun stopSegmentRotationTimer() {
+        rotationJob?.cancel()
+        rotationJob = null
     }
 
     private fun createNotificationChannel() {
@@ -293,9 +333,9 @@ class RecordingService : Service(), LifecycleOwner {
                 cameraProvider = cameraProviderFuture.get()
                 setupVideoCaptureAndStart()
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to initialize CameraProvider", e)
+                Log.e(TAG, "Failed to start camera provider", e)
                 _serviceState.value = _serviceState.value.copy(
-                    errorMessage = "CameraProvider初期化失敗: ${e.message}"
+                    errorMessage = "カメラ初期化失敗: ${e.message}"
                 )
             }
         }, ContextCompat.getMainExecutor(this))
@@ -304,20 +344,14 @@ class RecordingService : Service(), LifecycleOwner {
     @OptIn(ExperimentalCamera2Interop::class)
     private fun setupVideoCaptureAndStart() {
         val provider = cameraProvider ?: return
-
-        val quality = when (resHeight) {
-            480 -> Quality.SD
-            1080 -> Quality.FHD
-            else -> Quality.HD
-        }
+        provider.unbindAll()
 
         val recorderBuilder = Recorder.Builder()
-            .setQualitySelector(QualitySelector.from(quality))
-
+        val qualitySelector = QualitySelector.from(Quality.HD)
+        recorderBuilder.setQualitySelector(qualitySelector)
         val recorder = recorderBuilder.build()
 
         val videoCaptureBuilder = VideoCapture.Builder(recorder)
-
         val camera2Interop = Camera2Interop.Extender(videoCaptureBuilder)
         camera2Interop.setCaptureRequestOption(
             CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
@@ -325,6 +359,20 @@ class RecordingService : Service(), LifecycleOwner {
         )
 
         videoCapture = videoCaptureBuilder.build()
+
+        val analysis = ImageAnalysis.Builder()
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+            .build()
+
+        analysis.setAnalyzer(analysisExecutor, RearApproachDetector {
+            val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
+            val sens = prefs.getFloat("key_approach_sensitivity", 0.7f)
+            handleDetectedEvent(EventType.APPROACH, sens, "感度: ${(sens * 100).toInt()}%")
+        })
+
+        imageAnalysis = analysis
+
         val cameraSelector = if (activeCamera == ActiveCamera.REAR) {
             CameraSelector.DEFAULT_BACK_CAMERA
         } else {
@@ -332,26 +380,6 @@ class RecordingService : Service(), LifecycleOwner {
         }
 
         try {
-            provider.unbindAll()
-
-            imageAnalysis = ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-                .apply {
-                    setAnalyzer(analysisExecutor, RearApproachDetector(
-                        approachDebugLogger = approachDebugLogger,
-                        getApproachSensitivity = {
-                            val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
-                            prefs.getFloat("key_approach_sensitivity", 0.7f)
-                        },
-                        onApproachDetected = {
-                            val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
-                            val sens = prefs.getFloat("key_approach_sensitivity", 0.7f)
-                            handleDetectedEvent(EventType.APPROACH, sens, "感度: ${(sens * 100).toInt()}%")
-                        }
-                    ))
-                }
-
             provider.bindToLifecycle(
                 this,
                 cameraSelector,
@@ -359,7 +387,6 @@ class RecordingService : Service(), LifecycleOwner {
                 imageAnalysis
             )
             Log.i(TAG, "Bound CameraX VideoCapture + Analyzer ($activeCamera) at targetFps=$targetFps")
-
             startVideoFileOutput()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to bind VideoCapture use case", e)
@@ -371,9 +398,7 @@ class RecordingService : Service(), LifecycleOwner {
 
     private fun startVideoFileOutput() {
         val capture = videoCapture ?: return
-
         val segmentFile = ringBufferManager?.createNextSegmentFile() ?: return
-
         val outputOptions = FileOutputOptions.Builder(segmentFile).build()
 
         _serviceState.value = _serviceState.value.copy(
@@ -387,9 +412,6 @@ class RecordingService : Service(), LifecycleOwner {
         if (audioEnabled && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             @SuppressLint("MissingPermission")
             pendingRecording.withAudioEnabled()
-            Log.i(TAG, "Microphone audio recording is ENABLED")
-        } else {
-            Log.i(TAG, "Microphone audio recording is DISABLED")
         }
 
         activeRecording = pendingRecording.start(ContextCompat.getMainExecutor(this)) { event ->
@@ -425,10 +447,7 @@ class RecordingService : Service(), LifecycleOwner {
 
     fun handleDetectedEvent(eventType: EventType, sensitivityValue: Float, sensitivityLabel: String) {
         val now = System.currentTimeMillis()
-        if (now - recordingStartTimeMs < 3000L) {
-            Log.i(TAG, "⏳ 録画開始直後（ウォームアップ期間3秒）のため、検知をスキップします: ${eventType.displayName}")
-            return
-        }
+        if (now - recordingStartTimeMs < 3000L) return
 
         val lat = LocationTracker.lastValidLatitude
         val lon = LocationTracker.lastValidLongitude
@@ -456,68 +475,132 @@ class RecordingService : Service(), LifecycleOwner {
         existingDetections.add(0, detectionLog)
         EventDetectionLogStore.saveLogs(this, existingDetections)
 
-        eventCoordinator.recordDetectionDuringProtection(eventType, detectionLog.id)
-
         serviceScope.launch(Dispatchers.IO) {
-            eventCoordinator.executeWithProtection {
-                eventCoordinator.startIncidentSession(eventType, detectionLog.id)
-
-                val incidentLog = IncidentLog(
-                    timestampMs = now,
-                    triggerEventType = eventType,
-                    triggerDetectionLogId = detectionLog.id,
-                    relatedDetectionIds = listOf(detectionLog.id),
-                    highestSeverityType = eventType,
-                    latitude = lat,
-                    longitude = lon,
-                    status = IncidentStatus.PENDING
-                )
-                val existingIncidents = IncidentLogStore.loadIncidents(this@RecordingService).toMutableList()
-                existingIncidents.add(0, incidentLog)
-                IncidentLogStore.saveIncidents(this@RecordingService, existingIncidents)
-
-                try {
+            try {
+                if (eventType == EventType.APPROACH) {
+                    audioImpactDetector?.isMuted = true
                     toneGenerator.startTone(ToneGenerator.TONE_DTMF_S, 800)
-                    Log.i(TAG, "🔊 警告音鳴動 (${eventType.displayName})")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to play alert tone", e)
-                }
-
-                val currentFilePath = _serviceState.value.currentFile
-                val protectedFiles = ringBufferManager?.protectSegmentsForEvent(currentFilePath) ?: emptyList()
-                val (allRelatedIds, highestSeverity) = eventCoordinator.getAndClearActiveIncidentData(eventType)
-
-                if (protectedFiles.isNotEmpty()) {
-                    incidentLog.status = IncidentStatus.SUCCESS
-                    incidentLog.coveredSegmentFiles = protectedFiles
-                    incidentLog.relatedDetectionIds = allRelatedIds
-                    incidentLog.highestSeverityType = highestSeverity
-                    for (filePath in protectedFiles) {
-                        MediaScannerConnection.scanFile(this@RecordingService, arrayOf(filePath), null, null)
-                    }
-                    Log.i(TAG, "✨ Segment files successfully protected: $protectedFiles")
+                    Log.i(TAG, "🔊 接近警告音鳴動 (音量検知一時ミュート開始)")
+                    Thread.sleep(800L)
+                    audioImpactDetector?.isMuted = false
+                    Log.i(TAG, "🔊 接近警告音終了 (音量検知ミュート解除)")
                 } else {
-                    incidentLog.status = IncidentStatus.FAILED
-                    incidentLog.failureReason = "RingBufferManager returned empty protected segments"
-                    incidentLog.relatedDetectionIds = allRelatedIds
-                    incidentLog.highestSeverityType = highestSeverity
-                    Log.e(TAG, "❌ Failed to protect segment files")
+                    Log.i(TAG, "ℹ️ ${eventType.displayName}検知: 警告音なしでセグメント保護を実行します")
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to handle alert tone / mute", e)
+                audioImpactDetector?.isMuted = false
+            }
 
+            val currentFilePath = _serviceState.value.currentFile
+            // 1. すでに書き込みが完了している過去セグメントのパスリストを取得して即時保護
+            val completedPaths = ringBufferManager?.protectSegmentsForEvent(currentFilePath) ?: emptyList()
+            val coveredFiles = mutableListOf<String>()
+            coveredFiles.addAll(completedPaths)
+
+            // 2. 現行セグメント（書き込み中）を保護予約対象として追加
+            if (currentFilePath.isNotEmpty()) {
+                val curFile = File(currentFilePath)
+                if (curFile.exists()) {
+                    coveredFiles.add(curFile.absolutePath)
+                }
+            }
+            val candidateSet = coveredFiles.toSet()
+
+            val existingIncidents = IncidentLogStore.loadIncidents(this@RecordingService).toMutableList()
+
+            // インシデント統合判定
+            var targetWindow: IncidentWindow? = null
+            var targetIncident: IncidentLog? = null
+
+            for ((_, window) in activeIncidentWindows) {
+                if (window.targetSegmentPaths.any { candidateSet.contains(it) } || candidateSet.any { window.targetSegmentPaths.contains(it) }) {
+                    targetWindow = window
+                    targetIncident = existingIncidents.find { it.id == window.incidentId && it.status == IncidentStatus.PENDING }
+                    break
+                }
+            }
+
+            if (targetWindow != null && targetIncident != null) {
+                targetWindow.relatedDetectionIds.add(detectionLog.id)
+                targetWindow.highestSeverityType = getHigherSeverity(targetWindow.highestSeverityType, eventType)
+                targetWindow.targetSegmentPaths.addAll(candidateSet)
+
+                targetIncident.relatedDetectionIds = targetWindow.relatedDetectionIds.toList()
+                targetIncident.highestSeverityType = targetWindow.highestSeverityType
+                targetIncident.coveredSegmentFiles = targetWindow.targetSegmentPaths.toList()
+
+                detectionLog.incidentId = targetIncident.id
                 val updatedDetections = EventDetectionLogStore.loadLogs(this@RecordingService).toMutableList()
                 updatedDetections.forEach { det ->
-                    if (allRelatedIds.contains(det.id)) {
-                        det.incidentId = incidentLog.id
+                    if (targetIncident.relatedDetectionIds.contains(det.id)) {
+                        det.incidentId = targetIncident.id
                     }
                 }
                 EventDetectionLogStore.saveLogs(this@RecordingService, updatedDetections)
 
-                val finalIncidents = IncidentLogStore.loadIncidents(this@RecordingService).toMutableList()
-                val idx = finalIncidents.indexOfFirst { it.id == incidentLog.id }
-                if (idx >= 0) finalIncidents[idx] = incidentLog else finalIncidents.add(0, incidentLog)
-                IncidentLogStore.saveIncidents(this@RecordingService, finalIncidents)
+                val idx = existingIncidents.indexOfFirst { it.id == targetIncident.id }
+                if (idx >= 0) existingIncidents[idx] = targetIncident
+                IncidentLogStore.saveIncidents(this@RecordingService, existingIncidents)
+                Log.i(TAG, "🔄 既存PENDINGインシデントへ統合: ${targetIncident.id}")
+            } else {
+                val newIncident = IncidentLog(
+                    timestampMs = now,
+                    triggerEventType = eventType,
+                    triggerDetectionLogId = detectionLog.id,
+                    relatedDetectionIds = mutableListOf(detectionLog.id),
+                    highestSeverityType = eventType,
+                    latitude = lat,
+                    longitude = lon,
+                    coveredSegmentFiles = coveredFiles,
+                    status = IncidentStatus.PENDING
+                )
+
+                detectionLog.incidentId = newIncident.id
+                val updatedDetections = EventDetectionLogStore.loadLogs(this@RecordingService).toMutableList()
+                updatedDetections.forEach { det ->
+                    if (newIncident.relatedDetectionIds.contains(det.id)) {
+                        det.incidentId = newIncident.id
+                    }
+                }
+                EventDetectionLogStore.saveLogs(this@RecordingService, updatedDetections)
+
+                existingIncidents.add(0, newIncident)
+                IncidentLogStore.saveIncidents(this@RecordingService, existingIncidents)
+
+                val newWindow = IncidentWindow(
+                    incidentId = newIncident.id,
+                    targetSegmentPaths = candidateSet.toMutableSet(),
+                    relatedDetectionIds = mutableListOf(detectionLog.id),
+                    highestSeverityType = eventType
+                )
+                activeIncidentWindows[newIncident.id] = newWindow
+
+                Log.i(TAG, "✨ 新規PENDINGインシデントウィンドウ作成: ${newIncident.id}")
+            }
+
+            // 【即時通知判定】前セグメント（すでに書き込み完了しているファイル）が含まれている場合は即時通知発報
+            if (completedPaths.isNotEmpty()) {
+                val lastPath = completedPaths.last()
+                val incToNotify = existingIncidents.find { it.id == targetIncident?.id ?: activeIncidentWindows.values.firstOrNull { w -> w.targetSegmentPaths.contains(lastPath) }?.incidentId }
+                if (incToNotify != null) {
+                    showRecordingCompletionNotification(incToNotify)
+                    Log.i(TAG, "🔔 前セグメント即時保護のため、即時通知を発行しました: ${incToNotify.id}")
+                }
             }
         }
+    }
+
+    private fun getHigherSeverity(a: EventType, b: EventType): EventType {
+        val rank = mapOf(
+            EventType.COLLISION to 4,
+            EventType.DECELERATION to 3,
+            EventType.SOUND to 2,
+            EventType.APPROACH to 1
+        )
+        val rankA = rank[a] ?: 0
+        val rankB = rank[b] ?: 0
+        return if (rankB > rankA) b else a
     }
 
     private fun handleRecordEvent(event: VideoRecordEvent, filePath: String) {
@@ -541,6 +624,45 @@ class RecordingService : Service(), LifecycleOwner {
                     )
                 } else {
                     Log.i(TAG, "Segment recording finalized successfully: $filePath")
+
+                    serviceScope.launch(Dispatchers.IO) {
+                        val finalizedFile = File(filePath)
+                        val iterator = activeIncidentWindows.iterator()
+                        val incidents = IncidentLogStore.loadIncidents(this@RecordingService).toMutableList()
+
+                        while (iterator.hasNext()) {
+                            val entry = iterator.next()
+                            val window = entry.value
+                            if (window.targetSegmentPaths.any { File(it).absolutePath == finalizedFile.absolutePath }) {
+                                if (finalizedFile.exists() && finalizedFile.length() > 0) {
+                                    val recordingsDir = FileUtils.getRecordingsDir(this@RecordingService)
+                                    val destFile = File(recordingsDir, finalizedFile.name)
+                                    finalizedFile.copyTo(destFile, overwrite = true)
+                                    MediaScannerConnection.scanFile(this@RecordingService, arrayOf(destFile.absolutePath), null, null)
+                                    Log.i(TAG, "🔒 現行セグメント(書き込み中)のファイナライズ完了・保護コピー実行: ${destFile.absolutePath}")
+                                }
+
+                                val inc = incidents.find { it.id == window.incidentId }
+                                if (inc != null && inc.status == IncidentStatus.PENDING) {
+                                    inc.status = IncidentStatus.SUCCESS
+                                    if (finalizedFile.exists()) {
+                                        inc.timestampMs = finalizedFile.lastModified()
+                                    }
+                                    IncidentLogStore.saveIncidents(this@RecordingService, incidents)
+                                    Log.i(TAG, "✨ PENDING → SUCCESS 状態遷移完了(現行セグメント完了時): ${inc.id}")
+                                    // 現行セグメント完了時の遅延通知発報
+                                    showRecordingCompletionNotification(inc)
+                                    iterator.remove()
+                                }
+                            }
+                        }
+                    }
+
+                    if (_serviceState.value.isRecording) {
+                        serviceScope.launch(Dispatchers.Main) {
+                            startVideoFileOutput()
+                        }
+                    }
                 }
             }
         }
@@ -561,6 +683,7 @@ class RecordingService : Service(), LifecycleOwner {
     private fun stopRecordingPipeline() {
         metricsJob?.cancel()
         metricsJob = null
+        stopSegmentRotationTimer()
 
         activeRecording?.stop()
         activeRecording = null
@@ -577,6 +700,30 @@ class RecordingService : Service(), LifecycleOwner {
     private fun stopForegroundAndSelf() {
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    private fun showRecordingCompletionNotification(incidentLog: IncidentLog) {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            action = Intent.ACTION_VIEW
+            putExtra("EXTRA_TARGET_EVENT_ID", incidentLog.triggerDetectionLogId)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this, incidentLog.id.hashCode(), intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("ChariSafe 記録セグメント保護完了")
+            .setContentText("${incidentLog.triggerEventType.displayName}イベントの前後動画を保護しました")
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(incidentLog.id.hashCode(), notification)
     }
 
     override fun onDestroy() {

@@ -1,10 +1,13 @@
 package jp.hisanet.charisafe.ui.main
 
 import android.app.Application
+import android.content.Intent
 import android.util.Log
+import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import jp.hisanet.charisafe.data.config.ConfigRepositoryImpl
+import jp.hisanet.charisafe.data.local.RideSummaryStore
 import jp.hisanet.charisafe.data.repository.EventLogRepositoryImpl
 import jp.hisanet.charisafe.data.repository.GpxRepositoryImpl
 import jp.hisanet.charisafe.data.repository.RecordingRepositoryImpl
@@ -25,14 +28,22 @@ import jp.hisanet.charisafe.domain.repository.GpxRepository
 import jp.hisanet.charisafe.domain.repository.RecordingRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.cos
 import kotlin.math.sin
 import androidx.core.content.edit
+
+enum class Screen {
+    MAIN, HISTORY, RIDE_RESULTS, SETTINGS
+}
 
 sealed class TimelineItem(open val timestampMs: Long) {
     data class Recording(val incidentLog: IncidentLog) : TimelineItem(incidentLog.timestampMs)
@@ -47,7 +58,11 @@ data class MainUiState(
     val selectedEventFile: File? = null,
     val eventDetectionLogs: List<EventDetectionLog> = emptyList(),
     val incidentLogs: List<IncidentLog> = emptyList(),
-    val timelineItems: List<TimelineItem> = emptyList(),
+    val groupedTimelineItems: Map<String, List<TimelineItem>> = emptyMap(),
+    val rideSummaries: List<RideSummary> = emptyList(),
+    val currentScreen: Screen = Screen.MAIN,
+    val targetEventIdToHighlight: String? = null,
+    val sessionEventCounts: EventCountSummary = EventCountSummary(), // 録画セッション開始以降の件数
     val eventCounts: EventCountSummary = EventCountSummary(),
     val sensitivity: EventSensitivity = EventSensitivity(),
     val currentRideSummary: RideSummary? = null,
@@ -69,6 +84,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("charisafe_app_config", android.content.Context.MODE_PRIVATE)
     private val _savedEventFiles = MutableStateFlow<List<File>>(emptyList())
     private val _selectedEventFile = MutableStateFlow<File?>(null)
+    private val _currentScreen = MutableStateFlow(Screen.MAIN)
+    private val _targetEventId = MutableStateFlow<String?>(null)
+    private val _rideSummaries = MutableStateFlow<List<RideSummary>>(emptyList())
+    private val _sessionStartTimeMs = MutableStateFlow<Long>(0L)
+
     private val _sensitivity = MutableStateFlow(
         EventSensitivity(
             decelerationSensitivity = prefs.getFloat("key_decel_sensitivity", 1.5f),
@@ -85,24 +105,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         combine(configRepository.configState, recordingRepository.recordingState, gpxRepository.currentGpxPoint) { cfg, state, gpx ->
             Triple(cfg, state, gpx)
         },
-        combine(_savedEventFiles, _selectedEventFile, eventLogRepository.eventDetectionLogs) { files, selected, detections ->
-            Triple(files, selected, detections)
+        combine(_savedEventFiles, eventLogRepository.eventDetectionLogs, eventLogRepository.incidentLogs) { files, detections, incidents ->
+            Triple(files, detections, incidents)
         },
-        combine(eventLogRepository.incidentLogs, _sensitivity) { incidents, sens ->
-            Pair(incidents, sens)
+        combine(_currentScreen, _targetEventId, _sensitivity) { screen, targetId, sens ->
+            Triple(screen, targetId, sens)
         },
-        _currentRideSummary
-    ) { p1, p2, p3, summary ->
+        combine(_currentRideSummary, _rideSummaries, _sessionStartTimeMs) { currentSum, summaries, sessionStart ->
+            Triple(currentSum, summaries, sessionStart)
+        }
+    ) { p1, p2, p3, p4 ->
         val config = p1.first
         val state = p1.second
         val gpxPoint = p1.third
 
         val files = p2.first
-        val selected = p2.second
-        val detections = p2.third
+        val detections = p2.second
+        val incidents = p2.third
 
-        val incidents = p3.first
-        val sensitivity = p3.second
+        val screen = p3.first
+        val targetId = p3.second
+        val sensitivity = p3.third
+
+        val currentSum = p4.first
+        val summaries = p4.second
+        val sessionStart = p4.third
 
         val status = SystemStatus(
             state = state,
@@ -111,34 +138,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             lastEventFile = incidents.firstOrNull()?.coveredSegmentFiles?.firstOrNull() ?: files.firstOrNull()?.absolutePath
         )
 
-        val counts = EventCountSummary(
-            decelerationCount = detections.count { it.eventType == EventType.DECELERATION },
+        // 累計件数
+        val totalCounts = EventCountSummary(
             approachCount = detections.count { it.eventType == EventType.APPROACH },
+            decelerationCount = detections.count { it.eventType == EventType.DECELERATION },
             collisionCount = detections.count { it.eventType == EventType.COLLISION },
             soundCount = detections.count { it.eventType == EventType.SOUND }
         )
 
+        // セッション開始時刻以降の件数（未設定時は全ての検出ログを対象にして確実にカウントアップ）
+        val sessionDetections = if (sessionStart > 0L) detections.filter { it.timestampMs >= sessionStart } else detections
+        val sessionCounts = EventCountSummary(
+            approachCount = sessionDetections.count { it.eventType == EventType.APPROACH },
+            decelerationCount = sessionDetections.count { it.eventType == EventType.DECELERATION },
+            collisionCount = sessionDetections.count { it.eventType == EventType.COLLISION },
+            soundCount = sessionDetections.count { it.eventType == EventType.SOUND }
+        )
+
+        // タイムライン構築＆日付グルーピング (降順)
         val timeline = mutableListOf<TimelineItem>()
-        incidents.forEach { inc ->
-            timeline.add(TimelineItem.Recording(inc))
-        }
-        detections.forEach { det ->
-            timeline.add(TimelineItem.Detection(det))
-        }
+        incidents.forEach { timeline.add(TimelineItem.Recording(it)) }
+        detections.forEach { timeline.add(TimelineItem.Detection(it)) }
         val sortedTimeline = timeline.sortedByDescending { it.timestampMs }
+
+        val dateFormatter = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val grouped = sortedTimeline.groupBy { dateFormatter.format(Date(it.timestampMs)) }
 
         MainUiState(
             config = config,
             status = status,
             isExporting = (state == RecordingState.EXPORTING),
             savedEventFiles = files,
-            selectedEventFile = selected,
             eventDetectionLogs = detections,
             incidentLogs = incidents,
-            timelineItems = sortedTimeline,
-            eventCounts = counts,
+            groupedTimelineItems = grouped,
+            rideSummaries = summaries,
+            currentScreen = screen,
+            targetEventIdToHighlight = targetId,
+            sessionEventCounts = sessionCounts,
+            eventCounts = totalCounts,
             sensitivity = sensitivity,
-            currentRideSummary = summary
+            currentRideSummary = currentSum
         )
     }.stateIn(
         scope = viewModelScope,
@@ -148,6 +188,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         loadExistingEvents()
+        loadRideSummaries()
+
+        // 定期的にイベント履歴およびインシデントを自動リロードしてUIにリアルタイム反映
+        viewModelScope.launch {
+            while (true) {
+                delay(2000L)
+                loadExistingEvents()
+            }
+        }
         val gpxImpl = gpxRepository as? GpxRepositoryImpl
         gpxImpl?.onDecelerationDetected = {
             Log.w(TAG, "🚨 [Priority1] 減速検知トリガー受領")
@@ -155,7 +204,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val currentPoint = gpxRepository.currentGpxPoint.value
             val lat = currentPoint?.latitude ?: jp.hisanet.charisafe.data.location.LocationTracker.lastValidLatitude
             val lon = currentPoint?.longitude ?: jp.hisanet.charisafe.data.location.LocationTracker.lastValidLongitude
-            val speed = currentPoint?.speedKmh ?: 0f
+            val speed = currentPoint?.speedKmh ?: jp.hisanet.charisafe.data.location.LocationTracker.lastValidSpeedKmh
 
             val detectionLog = EventDetectionLog(
                 timestampMs = System.currentTimeMillis(),
@@ -182,20 +231,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setScreen(screen: Screen) {
+        _currentScreen.value = screen
+    }
+
+    fun setTargetEventIdToHighlight(eventId: String?) {
+        _targetEventId.value = eventId
+        if (eventId != null) {
+            _currentScreen.value = Screen.HISTORY
+        }
+    }
+
     fun loadExistingEvents() {
         viewModelScope.launch {
             try {
                 eventLogRepository.reload()
-
                 val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir(getApplication())
                 val files = recordingsDir.listFiles { _, name -> name.startsWith("event_") && name.endsWith(".mp4") }
                     ?.sortedByDescending { it.lastModified() }
                     ?: emptyList()
-                
                 _savedEventFiles.value = files
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load existing events", e)
             }
+        }
+    }
+
+    fun loadRideSummaries() {
+        viewModelScope.launch {
+            val summaries = RideSummaryStore.loadSummaries(getApplication())
+            _rideSummaries.value = summaries
         }
     }
 
@@ -218,6 +283,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         recordingRepository.startRecording(config)
         gpxRepository.startLogging(config.gpsIntervalSeconds)
         rideStartTimeMs = System.currentTimeMillis()
+        _sessionStartTimeMs.value = rideStartTimeMs
         synchronized(recordedPoints) { recordedPoints.clear() }
         _currentRideSummary.value = null
     }
@@ -249,7 +315,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val stoppedSec = (totalDurationSec - movingSec).coerceAtLeast(0L)
 
         val hours = if (totalDurationSec > 0) totalDurationSec / 3600.0 else 1.0
-        val counts = uiState.value.eventCounts
+        val detections = uiState.value.eventDetectionLogs
+        val rideDetections = detections.filter { rideStartTimeMs <= 0L || it.timestampMs >= rideStartTimeMs }
+        val counts = EventCountSummary(
+            approachCount = rideDetections.count { it.eventType == EventType.APPROACH },
+            decelerationCount = rideDetections.count { it.eventType == EventType.DECELERATION },
+            collisionCount = rideDetections.count { it.eventType == EventType.COLLISION },
+            soundCount = rideDetections.count { it.eventType == EventType.SOUND }
+        )
 
         val summary = RideSummary(
             startTimeMs = rideStartTimeMs,
@@ -271,8 +344,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         _currentRideSummary.value = summary
+
+        // 過去サマリーに追記して永続化
+        val currentList = _rideSummaries.value.toMutableList()
+        currentList.add(0, summary)
+        RideSummaryStore.saveSummaries(getApplication(), currentList)
+        _rideSummaries.value = currentList
+        _sessionStartTimeMs.value = 0L
+
         loadExistingEvents()
-        Log.i(TAG, "Ride ended. Distance: $totalDistKm km, Duration: $totalDurationSec sec")
+        Log.i(TAG, "Ride ended and summary saved. Distance: $totalDistKm km")
     }
 
     private fun calculateHaversineDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
@@ -282,7 +363,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val a = sin(dLat / 2) * sin(dLat / 2) +
                 cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
                 sin(dLon / 2) * sin(dLon / 2)
-        // 浮動小数点誤差による a > 1.0 での acos(NaN) を防止するため coerceIn および asin を採用
         val c = 2 * kotlin.math.asin(kotlin.math.sqrt(a.coerceIn(0.0, 1.0)))
         return r * c
     }
@@ -320,31 +400,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateClearPreviousData(clear: Boolean) {
         val current = configRepository.getConfig()
         configRepository.updateConfig(current.copy(clearPreviousLogsAndVideosOnStart = clear))
-        Log.i(TAG, "Updated clearPreviousLogsAndVideosOnStart to: $clear")
     }
 
     fun updateApproachCsvEnabled(enabled: Boolean) {
         val current = configRepository.getConfig()
         configRepository.updateConfig(current.copy(approachCsvEnabled = enabled))
-        Log.i(TAG, "Updated approachCsvEnabled to: $enabled")
     }
 
     fun updateAudioCsvEnabled(enabled: Boolean) {
         val current = configRepository.getConfig()
         configRepository.updateConfig(current.copy(audioCsvEnabled = enabled))
-        Log.i(TAG, "Updated audioCsvEnabled to: $enabled")
     }
 
     fun updateDecelerationCsvEnabled(enabled: Boolean) {
         val current = configRepository.getConfig()
         configRepository.updateConfig(current.copy(decelerationCsvEnabled = enabled))
-        Log.i(TAG, "Updated decelerationCsvEnabled to: $enabled")
     }
 
     fun updateCollisionCsvEnabled(enabled: Boolean) {
         val current = configRepository.getConfig()
         configRepository.updateConfig(current.copy(collisionCsvEnabled = enabled))
-        Log.i(TAG, "Updated collisionCsvEnabled to: $enabled")
     }
 
     fun shareDebugLogs() {
@@ -353,5 +428,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteDebugLogs() {
         jp.hisanet.charisafe.data.debug.DebugLogShareManager.deleteDebugLogs(getApplication())
+    }
+
+    fun deleteRideSummary(summary: RideSummary) {
+        viewModelScope.launch {
+            val currentList = _rideSummaries.value.toMutableList()
+            currentList.remove(summary)
+            _rideSummaries.value = currentList
+            RideSummaryStore.saveSummaries(getApplication(), currentList)
+            if (_currentRideSummary.value == summary) {
+                _currentRideSummary.value = currentList.firstOrNull()
+            }
+        }
+    }
+
+    fun shareGpxFile() {
+        val context = getApplication<Application>()
+        var gpxFile: File? = null
+
+        val activePath = gpxRepository.getActiveGpxFilePath()
+        if (!activePath.isNullOrEmpty()) {
+            val f = File(activePath)
+            if (f.exists() && f.length() > 0) {
+                gpxFile = f
+            }
+        }
+
+        if (gpxFile == null) {
+            val gpxDir = jp.hisanet.charisafe.util.FileUtils.getGpxDir(context)
+            val files = gpxDir.listFiles { _, name -> name.endsWith(".gpx") }
+                ?.sortedByDescending { it.lastModified() }
+            if (!files.isNullOrEmpty()) {
+                gpxFile = files.first()
+            }
+        }
+
+        if (gpxFile != null && gpxFile.exists() && gpxFile.length() > 0) {
+            try {
+                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", gpxFile)
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/gpx+xml"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                val chooser = Intent.createChooser(intent, "GPXログを共有").apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(chooser)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to share GPX file", e)
+            }
+        } else {
+            Log.w(TAG, "No valid GPX file found to share")
+        }
     }
 }

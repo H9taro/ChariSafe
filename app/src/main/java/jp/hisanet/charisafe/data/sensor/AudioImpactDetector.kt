@@ -24,6 +24,9 @@ class AudioImpactDetector(
     private var isListening = false
     private var listeningThread: Thread? = null
 
+    @Volatile
+    var isMuted: Boolean = false // 接近警告音鳴動中の一時ミュートフラグ (自作自演防止)
+
     @SuppressLint("MissingPermission")
     fun startListening() {
         if (isListening) return
@@ -80,7 +83,7 @@ class AudioImpactDetector(
                             triggered = triggered
                         )
 
-                        if (triggered) {
+                        if (triggered && !isMuted) {
                             Log.w(TAG, "💥 [AudioImpact] 大音量検知! Amp: $maxAmplitude (Threshold: $thresholdAmplitude)")
                             onLoudSoundDetected()
                         }

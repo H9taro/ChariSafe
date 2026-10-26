@@ -1,5 +1,6 @@
 package jp.hisanet.charisafe
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -20,6 +21,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        handleIntent(intent)
 
         setContent {
             ChariSafeTheme {
@@ -30,6 +32,19 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        val targetEventId = intent?.getStringExtra("EXTRA_TARGET_EVENT_ID")
+        if (!targetEventId.isNullOrEmpty()) {
+            viewModel.setTargetEventIdToHighlight(targetEventId)
         }
     }
 }

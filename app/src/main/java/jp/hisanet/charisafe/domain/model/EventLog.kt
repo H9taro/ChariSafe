@@ -30,7 +30,7 @@ enum class IncidentStatus(val displayName: String) {
 
 data class IncidentLog(
     val id: String = UUID.randomUUID().toString(),
-    val timestampMs: Long = System.currentTimeMillis(),
+    var timestampMs: Long = System.currentTimeMillis(),
     val triggerEventType: EventType,
     val triggerDetectionLogId: String,
     var relatedDetectionIds: List<String> = emptyList(),  // Lock保持期間中に起きた全 EventDetectionLog ID
