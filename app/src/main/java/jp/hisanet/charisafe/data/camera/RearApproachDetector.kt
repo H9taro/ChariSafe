@@ -22,11 +22,9 @@ class RearApproachDetector(
         private const val HIGH_BRIGHTNESS_PIXEL_THRESHOLD = 200
         private const val MAX_NIGHT_LUMINOSITY = 240.0 // テスト用に上限を緩和（屋内照明や街灯下でも動作するように調整）
         private const val REQUIRED_CONSECUTIVE_FRAMES = 4 // 連続成立フレーム数
-        private const val COOLDOWN_MS = 5000L // クールダウンを5秒に短縮（連続する追い越し・接近に対応）
     }
 
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
-    private var lastAlertTimestamp = 0L
 
     private val ratioHistory = FloatArray(5) { 0f }
     private var historyIndex = 0
@@ -101,8 +99,7 @@ class RearApproachDetector(
             val userSensitivity = getApproachSensitivity().coerceIn(0.3f, 1.0f)
             val dynamicScoreThreshold = 25.0f + (userSensitivity * 45.0f)
 
-            val now = System.currentTimeMillis()
-            val triggered = (approachScore >= dynamicScoreThreshold) && (consecutiveCount >= REQUIRED_CONSECUTIVE_FRAMES) && (now - lastAlertTimestamp > COOLDOWN_MS)
+            val triggered = (approachScore >= dynamicScoreThreshold) && (consecutiveCount >= REQUIRED_CONSECUTIVE_FRAMES)
 
             approachDebugLogger?.log(
                 avgLuminosity = avgLuminosity,
@@ -123,14 +120,11 @@ class RearApproachDetector(
                 Log.d(TAG, "🎯 接近候補成立 [Count: $consecutiveCount/$REQUIRED_CONSECUTIVE_FRAMES] Score: $approachScore (Th: $dynamicScoreThreshold)")
 
                 if (consecutiveCount >= REQUIRED_CONSECUTIVE_FRAMES) {
-                    if (now - lastAlertTimestamp > COOLDOWN_MS) {
-                        Log.w(TAG, "🚨 後方車両接近検知確定! Score: $approachScore (Th: $dynamicScoreThreshold), AvgLum: $avgLuminosity")
-                        lastAlertTimestamp = now
-                        consecutiveCount = 0
+                    Log.w(TAG, "🚨 後方車両接近検知確定! Score: $approachScore (Th: $dynamicScoreThreshold), AvgLum: $avgLuminosity")
+                    consecutiveCount = 0
 
-                        toneGenerator.startTone(ToneGenerator.TONE_DTMF_S, 600)
-                        onApproachDetected()
-                    }
+                    toneGenerator.startTone(ToneGenerator.TONE_DTMF_S, 600)
+                    onApproachDetected()
                 }
             } else {
                 if (consecutiveCount > 0) consecutiveCount--

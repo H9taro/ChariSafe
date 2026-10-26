@@ -83,8 +83,7 @@ fun MainScreen(
     var hasLocationPermission by remember { mutableStateOf(checkLocationPermission(context)) }
     var showDeleteLogsDialog by remember { mutableStateOf(false) }
 
-    // アコーディオン開閉状態
-    var isHistoryExpanded by remember { mutableStateOf(false) }
+
     var isSummaryExpanded by remember { mutableStateOf(false) }
     var isSettingsExpanded by remember { mutableStateOf(false) }
 
@@ -266,27 +265,6 @@ fun MainScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 2. 最後のイベントカード
-        if (uiState.lastDetectionLog != null) {
-            val last = uiState.lastDetectionLog!!
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(text = "🚨 最後のイベント検知", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "${last.eventType.emoji} ${last.eventType.displayName} (${last.sensitivityLabel})",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-        }
-
         // 3. イベント感度スライダー
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -439,113 +417,81 @@ fun MainScreen(
         // 【折りたたみエリア (Accordion)】
         // ==========================================
 
-        val filteredDetections = if (selectedFilterType == null) uiState.eventDetectionLogs else uiState.eventDetectionLogs.filter { it.eventType == selectedFilterType }
-
-        AccordionSection(title = "📁 イベント履歴 (${filteredDetections.size}件)", expanded = isHistoryExpanded, onToggle = { isHistoryExpanded = !isHistoryExpanded }) {
-            if (filteredDetections.isEmpty()) {
-                Text("該当するイベント履歴はありません", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(8.dp))
+        var isTimelineExpanded by remember { mutableStateOf(true) }
+        AccordionSection(title = "📁 走行ログ タイムライン (${uiState.timelineItems.size}件)", expanded = isTimelineExpanded, onToggle = { isTimelineExpanded = !isTimelineExpanded }) {
+            val items = if (selectedFilterType == null) {
+                uiState.timelineItems
             } else {
-                filteredDetections.forEach { det ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(text = "${det.eventType.emoji} ${det.eventType.displayName}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                if (!det.incidentId.isNullOrEmpty()) {
-                                    Surface(
-                                        color = MaterialTheme.colorScheme.primaryContainer,
-                                        shape = RoundedCornerShape(4.dp)
-                                    ) {
-                                        Text(text = "🎥 動画あり", fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.onPrimaryContainer)
-                                    }
-                                }
-                            }
-                            Text(text = "時刻: ${SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US).format(Date(det.timestampMs))}", fontSize = 11.sp, color = Color.Gray)
-                            Text(text = det.sensitivityLabel, fontSize = 11.sp, color = Color.DarkGray)
-                            Text(text = "速度: ${String.format(Locale.US, "%.1f", det.speedKmh)} km/h", fontSize = 11.sp, color = Color.DarkGray)
-
-                            Spacer(modifier = Modifier.height(6.dp))
-                            OutlinedButton(
-                                onClick = { shareMapLocation(det.latitude, det.longitude) },
-                                modifier = Modifier.fillMaxWidth().height(32.dp)
-                            ) {
-                                Text("📍 Map共有", fontSize = 11.sp)
-                            }
-                        }
+                uiState.timelineItems.filter { item ->
+                    when (item) {
+                        is TimelineItem.Detection -> item.detectionLog.eventType == selectedFilterType
+                        is TimelineItem.Recording -> false
                     }
                 }
             }
-        }
 
-        var isIncidentsExpanded by remember { mutableStateOf(true) }
-        AccordionSection(title = "🎥 保存動画一覧 (${uiState.incidentLogs.size}件)", expanded = isIncidentsExpanded, onToggle = { isIncidentsExpanded = !isIncidentsExpanded }) {
-            if (uiState.incidentLogs.isEmpty()) {
-                Text("保存されたインシデント動画はありません", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(8.dp))
+            if (items.isEmpty()) {
+                Text("該当するタイムライン履歴はありません", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(8.dp))
             } else {
-                uiState.incidentLogs.forEach { inc ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                items.forEach { item ->
+                    when (item) {
+                        is TimelineItem.Recording -> {
+                            val inc = item.incidentLog
+                            Card(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                             ) {
-                                Text(text = "🚨 ${inc.triggerEventType.emoji} ${inc.triggerEventType.displayName}インシデント", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                val statusColor = when (inc.status) {
-                                    IncidentStatus.SUCCESS -> Color(0xFF2E7D32)
-                                    IncidentStatus.PENDING -> Color(0xFFE65100)
-                                    IncidentStatus.FAILED -> Color(0xFFC62828)
-                                }
-                                Surface(
-                                    color = statusColor.copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(4.dp)
-                                ) {
-                                    Text(text = inc.status.displayName, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = statusColor)
-                                }
-                            }
-                            Text(text = "時刻: ${SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US).format(Date(inc.timestampMs))}", fontSize = 11.sp, color = Color.Gray)
-                            if (inc.highestSeverityType != inc.triggerEventType) {
-                                Text(text = "最高危険度: ${inc.highestSeverityType.emoji} ${inc.highestSeverityType.displayName}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
-                            }
-
-                            if (inc.videoFilePath.isEmpty() || !File(inc.videoFilePath).exists()) {
-                                if (inc.status == IncidentStatus.FAILED) {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(text = "理由: ${inc.failureReason ?: "不明なエラー"}", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
-                                }
-                            } else {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Button(
-                                    onClick = { shareFile(File(inc.videoFilePath)) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                    modifier = Modifier.fillMaxWidth().height(36.dp)
-                                ) {
-                                    Text("▶ 動画再生・共有 (${File(inc.videoFilePath).name})", fontSize = 11.sp)
-                                }
-                            }
-
-                            if (inc.relatedDetectionIds.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(text = "▼ 一連の発生イベントタイムライン (${inc.relatedDetectionIds.size}件):", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
-                                Spacer(modifier = Modifier.height(4.dp))
-
-                                val relatedDetections = uiState.eventDetectionLogs.filter { inc.relatedDetectionIds.contains(it.id) }.sortedBy { it.timestampMs }
-                                relatedDetections.forEach { rd ->
+                                Column(modifier = Modifier.padding(12.dp)) {
                                     Row(
-                                        modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 2.dp, bottom = 2.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(text = "• ${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(rd.timestampMs))} ${rd.eventType.emoji} ${rd.eventType.displayName}", fontSize = 10.sp)
-                                        Text(text = rd.sensitivityLabel, fontSize = 10.sp, color = Color.Gray)
+                                        Text(text = "🎥 記録", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text(text = SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US).format(Date(inc.timestampMs)), fontSize = 11.sp, color = Color.Gray)
+                                    }
+                                    if (inc.coveredSegmentFiles.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        inc.coveredSegmentFiles.forEach { filePath ->
+                                            val file = File(filePath)
+                                            if (file.exists() && file.length() > 0) {
+                                                Button(
+                                                    onClick = { shareFile(file) },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                                    modifier = Modifier.fillMaxWidth().height(36.dp).padding(vertical = 2.dp)
+                                                ) {
+                                                    Text("▶ 再生 / 📤 共有 (${file.name})", fontSize = 11.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        is TimelineItem.Detection -> {
+                            val det = item.detectionLog
+                            Card(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(text = "${det.eventType.emoji} ${det.eventType.displayName}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text(text = SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US).format(Date(det.timestampMs)), fontSize = 11.sp, color = Color.Gray)
+                                    }
+                                    Text(text = det.sensitivityLabel, fontSize = 11.sp, color = Color.DarkGray)
+                                    Text(text = "速度: ${String.format(Locale.US, "%.1f", det.speedKmh)} km/h", fontSize = 11.sp, color = Color.DarkGray)
+
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    OutlinedButton(
+                                        onClick = { shareMapLocation(det.latitude, det.longitude) },
+                                        modifier = Modifier.fillMaxWidth().height(32.dp)
+                                    ) {
+                                        Text("📍 Map共有", fontSize = 11.sp)
                                     }
                                 }
                             }

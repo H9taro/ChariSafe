@@ -23,9 +23,9 @@ data class EventDetectionLog(
 )
 
 enum class IncidentStatus(val displayName: String) {
-    PENDING("保存中..."),   // MP4セグメント抽出・結合処理中
-    SUCCESS("保存完了"),   // MP4動画の生成・メディアスキャン完了
-    FAILED("保存失敗")     // エラー（ディスク満杯、ファイル破損、OOM等）
+    PENDING("保護中..."),   // セグメント退避・メディアスキャン中
+    SUCCESS("保護完了"),       // 動画セグメントの保護・メディアスキャン完了
+    FAILED("保護失敗")         // エラー（ディスク満杯、ファイルコピー失敗等）
 }
 
 data class IncidentLog(
@@ -38,6 +38,7 @@ data class IncidentLog(
     val latitude: Double,
     val longitude: Double,
     var videoFilePath: String = "",
+    var coveredSegmentFiles: List<String> = emptyList(), // カバーする保護動画セグメントファイルパス一覧
     var status: IncidentStatus = IncidentStatus.PENDING,
     var failureReason: String? = null
 )

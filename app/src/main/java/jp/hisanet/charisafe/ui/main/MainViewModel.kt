@@ -34,6 +34,11 @@ import kotlin.math.cos
 import kotlin.math.sin
 import androidx.core.content.edit
 
+sealed class TimelineItem(open val timestampMs: Long) {
+    data class Recording(val incidentLog: IncidentLog) : TimelineItem(incidentLog.timestampMs)
+    data class Detection(val detectionLog: EventDetectionLog) : TimelineItem(detectionLog.timestampMs)
+}
+
 data class MainUiState(
     val config: AppConfig = AppConfig(),
     val status: SystemStatus = SystemStatus(),
@@ -42,7 +47,7 @@ data class MainUiState(
     val selectedEventFile: File? = null,
     val eventDetectionLogs: List<EventDetectionLog> = emptyList(),
     val incidentLogs: List<IncidentLog> = emptyList(),
-    val lastDetectionLog: EventDetectionLog? = null,
+    val timelineItems: List<TimelineItem> = emptyList(),
     val eventCounts: EventCountSummary = EventCountSummary(),
     val sensitivity: EventSensitivity = EventSensitivity(),
     val currentRideSummary: RideSummary? = null,
@@ -83,8 +88,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         combine(_savedEventFiles, _selectedEventFile, eventLogRepository.eventDetectionLogs) { files, selected, detections ->
             Triple(files, selected, detections)
         },
-        combine(eventLogRepository.incidentLogs, eventLogRepository.lastDetectionLog, _sensitivity) { incidents, lastDet, sens ->
-            Triple(incidents, lastDet, sens)
+        combine(eventLogRepository.incidentLogs, _sensitivity) { incidents, sens ->
+            Pair(incidents, sens)
         },
         _currentRideSummary
     ) { p1, p2, p3, summary ->
@@ -97,14 +102,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val detections = p2.third
 
         val incidents = p3.first
-        val lastDet = p3.second
-        val sensitivity = p3.third
+        val sensitivity = p3.second
 
         val status = SystemStatus(
             state = state,
             currentSpeedKmh = gpxPoint?.speedKmh ?: 0f,
             activeGpxFile = gpxRepository.getActiveGpxFilePath(),
-            lastEventFile = incidents.firstOrNull()?.videoFilePath ?: files.firstOrNull()?.absolutePath
+            lastEventFile = incidents.firstOrNull()?.coveredSegmentFiles?.firstOrNull() ?: files.firstOrNull()?.absolutePath
         )
 
         val counts = EventCountSummary(
@@ -114,6 +118,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             soundCount = detections.count { it.eventType == EventType.SOUND }
         )
 
+        val timeline = mutableListOf<TimelineItem>()
+        incidents.forEach { inc ->
+            timeline.add(TimelineItem.Recording(inc))
+        }
+        detections.forEach { det ->
+            timeline.add(TimelineItem.Detection(det))
+        }
+        val sortedTimeline = timeline.sortedByDescending { it.timestampMs }
+
         MainUiState(
             config = config,
             status = status,
@@ -122,7 +135,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             selectedEventFile = selected,
             eventDetectionLogs = detections,
             incidentLogs = incidents,
-            lastDetectionLog = lastDet,
+            timelineItems = sortedTimeline,
             eventCounts = counts,
             sensitivity = sensitivity,
             currentRideSummary = summary

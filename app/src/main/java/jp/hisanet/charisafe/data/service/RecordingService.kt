@@ -46,7 +46,7 @@ import jp.hisanet.charisafe.data.debug.CollisionDebugLogger
 import jp.hisanet.charisafe.data.debug.DebugLogCleanupManager
 import jp.hisanet.charisafe.data.local.EventDetectionLogStore
 import jp.hisanet.charisafe.data.local.IncidentLogStore
-import jp.hisanet.charisafe.data.local.ringbuffer.Mp4Concatenator
+
 import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
 import jp.hisanet.charisafe.data.location.LocationTracker
 import jp.hisanet.charisafe.data.sensor.AudioImpactDetector
@@ -456,10 +456,10 @@ class RecordingService : Service(), LifecycleOwner {
         existingDetections.add(0, detectionLog)
         EventDetectionLogStore.saveLogs(this, existingDetections)
 
-        eventCoordinator.recordDetectionDuringLock(eventType, detectionLog.id)
+        eventCoordinator.recordDetectionDuringProtection(eventType, detectionLog.id)
 
         serviceScope.launch(Dispatchers.IO) {
-            eventCoordinator.executeWithLock {
+            eventCoordinator.executeWithProtection {
                 eventCoordinator.startIncidentSession(eventType, detectionLog.id)
 
                 val incidentLog = IncidentLog(
@@ -483,21 +483,25 @@ class RecordingService : Service(), LifecycleOwner {
                     Log.e(TAG, "Failed to play alert tone", e)
                 }
 
-                val videoFile = exportEventVideoBlocking(ringBufferMinutes)
+                val currentFilePath = _serviceState.value.currentFile
+                val protectedFiles = ringBufferManager?.protectSegmentsForEvent(currentFilePath) ?: emptyList()
                 val (allRelatedIds, highestSeverity) = eventCoordinator.getAndClearActiveIncidentData(eventType)
 
-                if (videoFile != null && videoFile.exists() && videoFile.length() > 0) {
+                if (protectedFiles.isNotEmpty()) {
                     incidentLog.status = IncidentStatus.SUCCESS
-                    incidentLog.videoFilePath = videoFile.absolutePath
+                    incidentLog.coveredSegmentFiles = protectedFiles
                     incidentLog.relatedDetectionIds = allRelatedIds
                     incidentLog.highestSeverityType = highestSeverity
-                    Log.i(TAG, "✨ Incident video successfully saved: ${videoFile.absolutePath}")
+                    for (filePath in protectedFiles) {
+                        MediaScannerConnection.scanFile(this@RecordingService, arrayOf(filePath), null, null)
+                    }
+                    Log.i(TAG, "✨ Segment files successfully protected: $protectedFiles")
                 } else {
                     incidentLog.status = IncidentStatus.FAILED
-                    incidentLog.failureReason = "MP4 concatenation returned null or empty file"
+                    incidentLog.failureReason = "RingBufferManager returned empty protected segments"
                     incidentLog.relatedDetectionIds = allRelatedIds
                     incidentLog.highestSeverityType = highestSeverity
-                    Log.e(TAG, "❌ Failed to save incident video")
+                    Log.e(TAG, "❌ Failed to protect segment files")
                 }
 
                 val updatedDetections = EventDetectionLogStore.loadLogs(this@RecordingService).toMutableList()
@@ -512,56 +516,6 @@ class RecordingService : Service(), LifecycleOwner {
                 val idx = finalIncidents.indexOfFirst { it.id == incidentLog.id }
                 if (idx >= 0) finalIncidents[idx] = incidentLog else finalIncidents.add(0, incidentLog)
                 IncidentLogStore.saveIncidents(this@RecordingService, finalIncidents)
-            }
-        }
-    }
-
-    private suspend fun exportEventVideoBlocking(beforeMinutes: Int): File? {
-        return withContext(Dispatchers.IO) {
-            val currentFilePath = _serviceState.value.currentFile
-            val currentFile = File(currentFilePath)
-
-            withContext(Dispatchers.Main) {
-                activeRecording?.stop()
-                activeRecording = null
-            }
-            delay(timeMillis = 500L)
-
-            val segments = ringBufferManager?.getRecentSegmentsForExport(beforeMinutes) ?: emptyList()
-            val validSegments = if (currentFile.exists() && currentFile.length() > 0 && !segments.contains(currentFile)) {
-                segments + currentFile
-            } else {
-                segments
-            }
-
-            val workingDir = File(cacheDir, "working_segments").apply { if (!exists()) mkdirs() }
-            val workingFiles = mutableListOf<File>()
-
-            for (seg in validSegments) {
-                if (seg.exists() && seg.length() > 0) {
-                    val destFile = File(workingDir, seg.name)
-                    seg.copyTo(destFile, overwrite = true)
-                    workingFiles.add(destFile)
-                }
-            }
-
-            withContext(Dispatchers.Main) {
-                Log.i(TAG, "Resuming ring buffer recording immediately...")
-                setupVideoCaptureAndStart()
-            }
-
-            val recordingsDir = FileUtils.getRecordingsDir(this@RecordingService)
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val eventFile = File(recordingsDir, "event_${timestamp}_INCIDENT.mp4")
-
-            val success = Mp4Concatenator.concatenate(workingFiles, eventFile)
-            workingDir.deleteRecursively()
-
-            if (success) {
-                MediaScannerConnection.scanFile(this@RecordingService, arrayOf(eventFile.absolutePath), null, null)
-                eventFile
-            } else {
-                null
             }
         }
     }
