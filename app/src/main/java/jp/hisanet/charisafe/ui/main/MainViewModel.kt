@@ -442,6 +442,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun deleteCurrentRide() {
+        viewModelScope.launch {
+            eventLogRepository.clearAll()
+            try {
+                val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir(getApplication())
+                recordingsDir.listFiles()?.forEach { it.delete() }
+                loadExistingEvents()
+                _currentRideSummary.value = null
+                Log.i(TAG, "Current ride data successfully deleted and session reset")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to delete current ride data", e)
+            }
+        }
+    }
+
+    fun shareAllData() {
+        shareGpxFile()
+    }
+
+    fun shareLogsOnly() {
+        shareGpxFile()
+    }
+
+    fun shareVideosOnly() {
+        val context = getApplication<Application>()
+        val recDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir(context)
+        val latest = recDir.listFiles { _, name -> name.endsWith(".mp4") }?.maxByOrNull { it.lastModified() }
+        if (latest != null && latest.exists()) {
+            try {
+                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", latest)
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "video/mp4"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                val chooser = Intent.createChooser(intent, "動画データを共有").apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(chooser)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to share video", e)
+            }
+        }
+    }
+
     fun shareGpxFile() {
         val context = getApplication<Application>()
         var gpxFile: File? = null

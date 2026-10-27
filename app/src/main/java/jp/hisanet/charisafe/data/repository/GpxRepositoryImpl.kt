@@ -39,7 +39,10 @@ class GpxRepositoryImpl(
 
     private val decelerationDetector = SpeedDecelerationDetector(
         decelerationDebugLogger = decelerationDebugLogger,
-        getTargetSeconds = { 1.5f }
+        getTargetDecelerationMs2 = {
+            val prefs = context.getSharedPreferences("charisafe_app_config", Context.MODE_PRIVATE)
+            prefs.getFloat("key_decel_sensitivity", 2.5f)
+        }
     ) {
         Log.w(TAG, "🚨 急減速検知コールバック発火 -> 自動イベント保存を実行します")
         onDecelerationDetected?.invoke()
