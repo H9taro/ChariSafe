@@ -271,20 +271,24 @@ class RecordingService : Service(), LifecycleOwner {
     }
 
     private fun startForegroundWithNotification() {
-        val notificationIntent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, notificationIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
+        val silentChannelId = "charisafe_silent_channel"
+        val channel = NotificationChannel(
+            silentChannelId,
+            "Background Service",
+            NotificationManager.IMPORTANCE_NONE
+        ).apply {
+            description = "Background Service"
+            setShowBadge(false)
+        }
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(channel)
 
-        val camLabel = if (activeCamera == ActiveCamera.REAR) "後方(リア)" else "前方(フロント)"
-        val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("ChariSafe 録画稼働中 ($camLabel)")
-            .setContentText("${resHeight}p / ${targetFps}fps 安全録画中")
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+        val notification: Notification = NotificationCompat.Builder(this, silentChannelId)
+            .setContentTitle("")
+            .setContentText("")
+            .setSmallIcon(android.R.color.transparent)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setSilent(true)
             .build()
 
         startForeground(

@@ -84,4 +84,14 @@ class GpxRepositoryImpl(
     override fun getActiveGpxFilePath(): String? {
         return activeGpxFile?.absolutePath
     }
+
+    override fun clearAll() {
+        try {
+            activeGpxFile?.delete()
+            activeGpxFile = null
+            gpxWriter = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to clear GPX files", e)
+        }
+    }
 }

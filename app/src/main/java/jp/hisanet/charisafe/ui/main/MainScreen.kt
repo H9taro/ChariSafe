@@ -2,6 +2,7 @@ package jp.hisanet.charisafe.ui.main
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -16,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -64,11 +66,11 @@ fun MainScreen(
                     text = "ChariSafe メニュー",
                     modifier = Modifier.padding(16.dp),
                     fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
+                    fontSize = 20.sp
                 )
                 HorizontalDivider()
                 NavigationDrawerItem(
-                    label = { Text("🏠 ホーム", fontSize = 16.sp) },
+                    label = { Text("🏠 ホーム", fontSize = 18.sp) },
                     selected = uiState.currentScreen == Screen.MAIN,
                     onClick = {
                         viewModel.setScreen(Screen.MAIN)
@@ -77,7 +79,7 @@ fun MainScreen(
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                 )
                 NavigationDrawerItem(
-                    label = { Text("📁 イベント履歴", fontSize = 16.sp) },
+                    label = { Text("📁 イベント履歴", fontSize = 18.sp) },
                     selected = uiState.currentScreen == Screen.HISTORY,
                     onClick = {
                         viewModel.setScreen(Screen.HISTORY)
@@ -86,7 +88,7 @@ fun MainScreen(
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                 )
                 NavigationDrawerItem(
-                    label = { Text("📈 ライド結果", fontSize = 16.sp) },
+                    label = { Text("📈 ライド結果", fontSize = 18.sp) },
                     selected = uiState.currentScreen == Screen.RIDE_RESULTS,
                     onClick = {
                         viewModel.setScreen(Screen.RIDE_RESULTS)
@@ -95,7 +97,7 @@ fun MainScreen(
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                 )
                 NavigationDrawerItem(
-                    label = { Text("⚙️ 設定", fontSize = 16.sp) },
+                    label = { Text("⚙️ 設定", fontSize = 18.sp) },
                     selected = uiState.currentScreen == Screen.SETTINGS,
                     onClick = {
                         viewModel.setScreen(Screen.SETTINGS)
@@ -116,16 +118,16 @@ fun MainScreen(
                             Screen.RIDE_RESULTS -> "ライド結果"
                             Screen.SETTINGS -> "設定"
                         }
-                        Text(title, fontWeight = FontWeight.Bold)
+                        Text(title, fontWeight = FontWeight.Bold, fontSize = 20.sp)
                     },
                     navigationIcon = {
                         if (uiState.currentScreen == Screen.MAIN) {
                             IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                Text(text = "☰", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                Text(text = "☰", fontSize = 24.sp, fontWeight = FontWeight.Bold)
                             }
                         } else {
                             IconButton(onClick = { viewModel.setScreen(Screen.MAIN) }) {
-                                Text(text = "←", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                Text(text = "←", fontSize = 24.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     },
@@ -156,8 +158,8 @@ fun MainScreen(
     if (showDeleteConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirmDialog = false },
-            title = { Text("⚠️ 現在ライドのデータ削除") },
-            text = { Text("現在のライドデータ（動画・ログ・サマリー）をすべて削除して初期状態に戻しますか？") },
+            title = { Text("⚠️ 現在ライドのデータ削除", fontSize = 20.sp, fontWeight = FontWeight.Bold) },
+            text = { Text("現在のライドデータ（動画・ログ・サマリー）をすべて削除して初期状態に戻しますか？", fontSize = 16.sp) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -166,39 +168,39 @@ fun MainScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("削除実行")
+                    Text("削除実行", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 OutlinedButton(onClick = { showDeleteConfirmDialog = false }) {
-                    Text("キャンセル")
+                    Text("キャンセル", fontSize = 16.sp)
                 }
             }
         )
     }
 
-    // データ共有選択モーダル (シンプル化されたボタン名)
+    // データ共有選択モーダル
     if (showShareModal) {
         AlertDialog(
             onDismissRequest = { showShareModal = false },
-            title = { Text("📦 ライドデータを共有") },
+            title = { Text("📦 ライドデータを共有", fontSize = 20.sp, fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { viewModel.shareAllData(); showShareModal = false }, modifier = Modifier.fillMaxWidth()) {
-                        Text("すべて共有")
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = { viewModel.shareAllData(); showShareModal = false }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                        Text("すべて共有", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
-                    Button(onClick = { viewModel.shareLogsOnly(); showShareModal = false }, modifier = Modifier.fillMaxWidth()) {
-                        Text("ログのみ共有")
+                    Button(onClick = { viewModel.shareLogsOnly(); showShareModal = false }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                        Text("ログのみ共有", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
-                    Button(onClick = { viewModel.shareVideosOnly(); showShareModal = false }, modifier = Modifier.fillMaxWidth()) {
-                        Text("動画のみ共有")
+                    Button(onClick = { viewModel.shareVideosOnly(); showShareModal = false }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                        Text("動画のみ共有", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             },
             confirmButton = {},
             dismissButton = {
                 OutlinedButton(onClick = { showShareModal = false }) {
-                    Text("閉じる")
+                    Text("閉じる", fontSize = 16.sp)
                 }
             }
         )
@@ -206,7 +208,7 @@ fun MainScreen(
 }
 
 /**
- * 🏠 ホーム画面（リアルタイム比較バー付き・赤色録画ボタン）
+ * 🏠 ホーム画面（4種すべてにリアルタイム比較バー完備・AStargazerシャッターボタン）
  */
 @Composable
 fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
@@ -251,17 +253,17 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 2. 感度スライダー 4種 ＆ リアルタイム比較バー
+        // 2. 感度スライダー 4種 ＆ リアルタイム比較バー（スケール完全一致）
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                // 接近
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // 接近 (スケール: 0.3f..1.0f)
                 Column {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(text = "接近 ${(uiState.sensitivity.approachSensitivity * 100).toInt()}%", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "${uiState.sessionEventCounts.approachCount}件", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "接近 ${(uiState.sensitivity.approachSensitivity * 100).toInt()}%", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "${uiState.sessionEventCounts.approachCount}件", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                     Slider(
                         value = uiState.sensitivity.approachSensitivity,
@@ -270,19 +272,18 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                         steps = 7
                     )
                     RealtimeComparisonBar(
-                        currentValue = uiState.status.currentSpeedKmh,
-                        thresholdValue = uiState.sensitivity.approachSensitivity * 100f,
-                        minValue = 0f,
-                        maxValue = 100f,
-                        label = "接近スコア"
+                        currentValue = (uiState.currentApproachScore / 100f).coerceIn(0.3f, 1.0f),
+                        thresholdValue = uiState.sensitivity.approachSensitivity,
+                        minValue = 0.3f,
+                        maxValue = 1.0f
                     )
                 }
 
-                // 減速 (m/s^2)
+                // 減速 (スケール: 1.0f..4.0f)
                 Column {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(text = "減速 ${String.format(Locale.US, "%.1f", uiState.sensitivity.decelerationSensitivity)} m/s²", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "${uiState.sessionEventCounts.decelerationCount}件", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "減速 ${String.format(Locale.US, "%.1f", uiState.sensitivity.decelerationSensitivity)} m/s²", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "${uiState.sessionEventCounts.decelerationCount}件", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                     Slider(
                         value = uiState.sensitivity.decelerationSensitivity,
@@ -291,19 +292,18 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                         steps = 29
                     )
                     RealtimeComparisonBar(
-                        currentValue = 0f,
+                        currentValue = uiState.currentDecelValue.coerceIn(1.0f, 4.0f),
                         thresholdValue = uiState.sensitivity.decelerationSensitivity,
-                        minValue = 0f,
-                        maxValue = 5f,
-                        label = "減速度 (m/s²)"
+                        minValue = 1.0f,
+                        maxValue = 4.0f
                     )
                 }
 
-                // 衝撃
+                // 衝撃 (スケール: 2.0f..5.0f)
                 Column {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(text = "衝撃 ${String.format(Locale.US, "%.1f", uiState.sensitivity.collisionSensitivity)}G", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "${uiState.sessionEventCounts.collisionCount}件", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "衝撃 ${String.format(Locale.US, "%.1f", uiState.sensitivity.collisionSensitivity)}G", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "${uiState.sessionEventCounts.collisionCount}件", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                     Slider(
                         value = uiState.sensitivity.collisionSensitivity,
@@ -311,13 +311,19 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                         valueRange = 2.0f..5.0f,
                         steps = 15
                     )
+                    RealtimeComparisonBar(
+                        currentValue = uiState.currentGValue.coerceIn(2.0f, 5.0f),
+                        thresholdValue = uiState.sensitivity.collisionSensitivity,
+                        minValue = 2.0f,
+                        maxValue = 5.0f
+                    )
                 }
 
-                // 音量
+                // 音量 (スケール: 1000f..10000f)
                 Column {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(text = "音量 ${uiState.sensitivity.soundSensitivity.toInt()}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "${uiState.sessionEventCounts.soundCount}件", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "音量 ${uiState.sensitivity.soundSensitivity.toInt()}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "${uiState.sessionEventCounts.soundCount}件", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                     Slider(
                         value = uiState.sensitivity.soundSensitivity,
@@ -325,74 +331,97 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                         valueRange = 1000f..10000f,
                         steps = 18
                     )
+                    RealtimeComparisonBar(
+                        currentValue = uiState.currentSoundAmplitude.coerceIn(1000f, 10000f),
+                        thresholdValue = uiState.sensitivity.soundSensitivity,
+                        minValue = 1000f,
+                        maxValue = 10000f
+                    )
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 3. 赤色の録画開始ボタン (停止中は赤、録画中はダークグレー)
-        Box(
-            modifier = Modifier
-                .size(80.dp)
-                .background(
-                    color = if (isRecording) Color(0xFF424242) else Color(0xFFC62828),
-                    shape = CircleShape
-                ),
-            contentAlignment = Alignment.Center
+        // 3. AStargazerスタイルのシャッターボタン
+        CameraShutterButton(isRecording = isRecording) {
+            if (isRecording) viewModel.stopRecording() else viewModel.startRecording()
+        }
+    }
+}
+
+/**
+ * AStargazerプロジェクトスタイルのシャッターボタン形状
+ */
+@Composable
+fun CameraShutterButton(isRecording: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(72.dp)
+            .background(Color.White, CircleShape)
+            .padding(3.dp), // 外側の白いリング
+        contentAlignment = Alignment.Center
+    ) {
+        Button(
+            onClick = onClick,
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+            shape = CircleShape,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(0.dp)
         ) {
-            Button(
-                onClick = {
-                    if (isRecording) viewModel.stopRecording() else viewModel.startRecording()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                modifier = Modifier.fillMaxSize()
-            ) {
+            if (isRecording) {
                 Box(
-                    modifier = Modifier.size(if (isRecording) 32.dp else 40.dp).background(
-                        color = Color.White,
-                        shape = if (isRecording) RoundedCornerShape(4.dp) else CircleShape
-                    )
+                    modifier = Modifier
+                        .size(24.dp)
+                        .background(Color.White, RoundedCornerShape(4.dp))
                 )
             }
         }
     }
 }
 
+/**
+ * リアルタイム比較バー（バー長＝現在値、閾値＝縦棒、数値なし、スケール完全一致）
+ */
 @Composable
 fun RealtimeComparisonBar(
     currentValue: Float,
     thresholdValue: Float,
     minValue: Float,
-    maxValue: Float,
-    label: String
+    maxValue: Float
 ) {
     val fraction = ((currentValue - minValue) / (maxValue - minValue)).coerceIn(0f, 1f)
+    val thresholdFraction = ((thresholdValue - minValue) / (maxValue - minValue)).coerceIn(0f, 1f)
     val isExceeding = currentValue >= thresholdValue
 
-    Column(modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(text = "$label: ${String.format(Locale.US, "%.1f", currentValue)}", fontSize = 11.sp, color = if (isExceeding) Color.Red else Color.LightGray)
-            Text(text = "閾値: ${String.format(Locale.US, "%.1f", thresholdValue)}", fontSize = 11.sp, color = Color.LightGray)
-        }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(10.dp)
+            .background(Color.DarkGray, RoundedCornerShape(5.dp))
+    ) {
+        // バーの長さ＝センサーの現在値（スライダーとスケール完全一致）
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(6.dp)
-                .background(Color.DarkGray, RoundedCornerShape(3.dp))
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(fraction)
-                    .fillMaxHeight()
-                    .background(if (isExceeding) Color.Red else MaterialTheme.colorScheme.primary, RoundedCornerShape(3.dp))
+                .fillMaxWidth(fraction)
+                .fillMaxHeight()
+                .background(if (isExceeding) Color.Red else MaterialTheme.colorScheme.primary, RoundedCornerShape(5.dp))
+        )
+        // 閾値は縦棒の位置で表す
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val x = size.width * thresholdFraction
+            drawLine(
+                color = Color.White,
+                start = Offset(x, 0f),
+                end = Offset(x, size.height),
+                strokeWidth = 4f
             )
         }
     }
 }
 
 /**
- * 📁 イベント履歴画面（1行タップ即再生・文言なし）
+ * 📁 イベント履歴画面
  */
 @Composable
 fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState: androidx.compose.foundation.lazy.LazyListState) {
@@ -401,7 +430,7 @@ fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState:
 
     if (grouped.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("イベント履歴はありません", fontSize = 16.sp, color = Color.Gray)
+            Text("イベント履歴はありません", fontSize = 18.sp, color = Color.Gray)
         }
     } else {
         LazyColumn(
@@ -413,7 +442,7 @@ fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState:
                 item {
                     Text(
                         text = "📅 $dateStr",
-                        fontSize = 17.sp,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(vertical = 6.dp)
@@ -454,9 +483,9 @@ fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState:
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "🎥 記録動画  ${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(inc.timestampMs))}",
+                                        text = "🎥 動画  ${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(inc.timestampMs))}",
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp,
+                                        fontSize = 16.sp,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
@@ -500,7 +529,7 @@ fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState:
                                     Text(
                                         text = displayText,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp,
+                                        fontSize = 15.sp,
                                         color = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.fillMaxWidth()
                                     )
@@ -515,7 +544,7 @@ fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState:
 }
 
 /**
- * 📈 ライド結果画面（高コントラスト白文字・単一サマリー）
+ * 📈 ライド結果画面
  */
 @Composable
 fun RideResultContent(uiState: MainUiState) {
@@ -523,47 +552,53 @@ fun RideResultContent(uiState: MainUiState) {
 
     if (target == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("現在進行中のライドデータはありません", fontSize = 16.sp, color = Color.Gray)
+            Text("現在進行中のライドデータはありません", fontSize = 18.sp, color = Color.Gray)
         }
     } else {
         val movingMin = target.movingTimeSec / 60
         val movingSec = target.movingTimeSec % 60
+        val stoppedMin = target.stoppedTimeSec / 60
+        val stoppedSec = target.stoppedTimeSec % 60
+
         Column(
             modifier = Modifier.fillMaxSize().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(text = "走行時間: ${movingMin}分 ${movingSec}秒 (停止: ${target.stoppedTimeSec}秒)", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text(text = "総距離: ${String.format(Locale.US, "%.2f", target.totalDistanceKm)} km", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text(text = "平均速度: ${String.format(Locale.US, "%.1f", target.averageSpeedKmh)} km/h (最高: ${target.maxSpeedKmh} km/h)", fontSize = 15.sp, color = Color.White)
+                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(text = "走行時間: ${movingMin}分 ${movingSec}秒", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text(text = "停止時間: ${stoppedMin}分 ${stoppedSec}秒", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    
+                    Text(text = "総距離: ${String.format(Locale.US, "%.2f", target.totalDistanceKm)} km", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    
+                    Text(text = "平均速度: ${String.format(Locale.US, "%.1f", target.averageSpeedKmh)} km/h", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text(text = "最高速度: ${String.format(Locale.US, "%.1f", target.maxSpeedKmh)} km/h", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
 
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text(text = "【危険度定量的指標】", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
+                    Text(text = "【危険度定量的指標】", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.primary)
                     
-                    // 高コントラスト白文字・同一色トーン
-                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                        Text(text = "🚗 接近: ${target.eventCounts.approachCount}件", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "   • 距離あたり: ${String.format(Locale.US, "%.2f", target.approachPerKm)} 件/km", fontSize = 13.sp, color = Color.LightGray)
-                        Text(text = "   • 時間あたり: ${String.format(Locale.US, "%.1f", target.approachPerHour)} 件/h", fontSize = 13.sp, color = Color.LightGray)
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                        Text(text = "🚗 接近: ${target.eventCounts.approachCount}件", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "   • 距離あたり: ${String.format(Locale.US, "%.2f", target.approachPerKm)} 件/km", fontSize = 16.sp, color = Color.LightGray)
+                        Text(text = "   • 時間あたり: ${String.format(Locale.US, "%.1f", target.approachPerHour)} 件/h", fontSize = 16.sp, color = Color.LightGray)
                     }
-                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                        Text(text = "⚠ 減速: ${target.eventCounts.decelerationCount}件", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "   • 距離あたり: ${String.format(Locale.US, "%.2f", target.decelerationPerKm)} 件/km", fontSize = 13.sp, color = Color.LightGray)
-                        Text(text = "   • 時間あたり: ${String.format(Locale.US, "%.1f", target.decelerationPerHour)} 件/h", fontSize = 13.sp, color = Color.LightGray)
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                        Text(text = "⚠ 減速: ${target.eventCounts.decelerationCount}件", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "   • 距離あたり: ${String.format(Locale.US, "%.2f", target.decelerationPerKm)} 件/km", fontSize = 16.sp, color = Color.LightGray)
+                        Text(text = "   • 時間あたり: ${String.format(Locale.US, "%.1f", target.decelerationPerHour)} 件/h", fontSize = 16.sp, color = Color.LightGray)
                     }
-                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                        Text(text = "💥 衝撃: ${target.eventCounts.collisionCount}件", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "   • 距離あたり: ${String.format(Locale.US, "%.2f", target.collisionPerKm)} 件/km", fontSize = 13.sp, color = Color.LightGray)
-                        Text(text = "   • 時間あたり: ${String.format(Locale.US, "%.1f", target.collisionPerHour)} 件/h", fontSize = 13.sp, color = Color.LightGray)
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                        Text(text = "💥 衝撃: ${target.eventCounts.collisionCount}件", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "   • 距離あたり: ${String.format(Locale.US, "%.2f", target.collisionPerKm)} 件/km", fontSize = 16.sp, color = Color.LightGray)
+                        Text(text = "   • 時間あたり: ${String.format(Locale.US, "%.1f", target.collisionPerHour)} 件/h", fontSize = 16.sp, color = Color.LightGray)
                     }
-                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                        Text(text = "🔊 音量: ${target.eventCounts.soundCount}件", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "   • 距離あたり: ${String.format(Locale.US, "%.2f", target.soundPerKm)} 件/km", fontSize = 13.sp, color = Color.LightGray)
-                        Text(text = "   • 時間あたり: ${String.format(Locale.US, "%.1f", target.soundPerHour)} 件/h", fontSize = 13.sp, color = Color.LightGray)
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                        Text(text = "🔊 音量: ${target.eventCounts.soundCount}件", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "   • 距離あたり: ${String.format(Locale.US, "%.2f", target.soundPerKm)} 件/km", fontSize = 16.sp, color = Color.LightGray)
+                        Text(text = "   • 時間あたり: ${String.format(Locale.US, "%.1f", target.soundPerHour)} 件/h", fontSize = 16.sp, color = Color.LightGray)
                     }
                 }
             }
@@ -572,7 +607,7 @@ fun RideResultContent(uiState: MainUiState) {
 }
 
 /**
- * ⚙️ 設定画面（完全な撮影設定復活 ＆ ライドデータセクション ＆ シンプルボタン）
+ * ⚙️ 設定画面
  */
 @Composable
 fun SettingsContent(
@@ -598,45 +633,45 @@ fun SettingsContent(
             ) {
                 Text(
                     text = "⚠️ 録画中のため、設定の変更はロックされています（停止後に変更可能）",
-                    fontSize = 13.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    color = MaterialTheme.colorScheme.errorContainer,
                     modifier = Modifier.padding(16.dp)
                 )
             }
         }
 
-        // 1. 撮影設定（完全復活）
+        // 1. 撮影設定
         Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(text = "撮影設定 (Camera & Resolution)", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(text = "撮影設定 (Camera & Resolution)", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White)
                 
                 // アクティブカメラ
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("アクティブカメラ", fontSize = 14.sp, color = Color.White)
+                    Text("アクティブカメラ", fontSize = 16.sp, color = Color.White)
                     var cameraExpanded by remember { mutableStateOf(false) }
                     Box {
                         OutlinedButton(onClick = { cameraExpanded = true }, enabled = !isRecording) {
-                            Text(if (config.activeCamera == ActiveCamera.REAR) "後方(リア)" else "前方(フロント)")
+                            Text(if (config.activeCamera == ActiveCamera.REAR) "後方(リア)" else "前方(フロント)", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                         DropdownMenu(expanded = cameraExpanded, onDismissRequest = { cameraExpanded = false }) {
-                            DropdownMenuItem(text = { Text("後方(リア)") }, onClick = { viewModel.updateActiveCamera(ActiveCamera.REAR); cameraExpanded = false })
-                            DropdownMenuItem(text = { Text("前方(フロント)") }, onClick = { viewModel.updateActiveCamera(ActiveCamera.FRONT); cameraExpanded = false })
+                            DropdownMenuItem(text = { Text("後方(リア)", fontSize = 16.sp) }, onClick = { viewModel.updateActiveCamera(ActiveCamera.REAR); cameraExpanded = false })
+                            DropdownMenuItem(text = { Text("前方(フロント)", fontSize = 16.sp) }, onClick = { viewModel.updateActiveCamera(ActiveCamera.FRONT); cameraExpanded = false })
                         }
                     }
                 }
 
                 // フレームレート (FPS)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("フレームレート (FPS)", fontSize = 14.sp, color = Color.White)
+                    Text("フレームレート (FPS)", fontSize = 16.sp, color = Color.White)
                     var fpsExpanded by remember { mutableStateOf(false) }
                     Box {
                         OutlinedButton(onClick = { fpsExpanded = true }, enabled = !isRecording) {
-                            Text("${config.fps} fps")
+                            Text("${config.fps} fps", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                         DropdownMenu(expanded = fpsExpanded, onDismissRequest = { fpsExpanded = false }) {
                             listOf(5, 10, 15).forEach { f ->
-                                DropdownMenuItem(text = { Text("$f fps") }, onClick = { viewModel.updateFps(f); fpsExpanded = false })
+                                DropdownMenuItem(text = { Text("$f fps", fontSize = 16.sp) }, onClick = { viewModel.updateFps(f); fpsExpanded = false })
                             }
                         }
                     }
@@ -644,15 +679,15 @@ fun SettingsContent(
 
                 // 録画解像度
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("録画解像度", fontSize = 14.sp, color = Color.White)
+                    Text("録画解像度", fontSize = 16.sp, color = Color.White)
                     var resExpanded by remember { mutableStateOf(false) }
                     Box {
                         OutlinedButton(onClick = { resExpanded = true }, enabled = !isRecording) {
-                            Text("${config.resolution.width}x${config.resolution.height}")
+                            Text("${config.resolution.width}x${config.resolution.height}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                         DropdownMenu(expanded = resExpanded, onDismissRequest = { resExpanded = false }) {
                             VideoResolution.entries.forEach { res ->
-                                DropdownMenuItem(text = { Text("${res.width}x${res.height}") }, onClick = { resExpanded = false })
+                                DropdownMenuItem(text = { Text("${res.width}x${res.height}", fontSize = 16.sp) }, onClick = { resExpanded = false })
                             }
                         }
                     }
@@ -662,15 +697,15 @@ fun SettingsContent(
 
                 // リングバッファ時間
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("リングバッファ保持時間", fontSize = 14.sp, color = Color.White)
+                    Text("リングバッファ保持時間", fontSize = 16.sp, color = Color.White)
                     var rbExpanded by remember { mutableStateOf(false) }
                     Box {
                         OutlinedButton(onClick = { rbExpanded = true }, enabled = !isRecording) {
-                            Text("${config.ringBufferMinutes} 分")
+                            Text("${config.ringBufferMinutes} 分", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                         DropdownMenu(expanded = rbExpanded, onDismissRequest = { rbExpanded = false }) {
                             listOf(3, 5, 10).forEach { min ->
-                                DropdownMenuItem(text = { Text("$min 分") }, onClick = { viewModel.updateRingBuffer(min); rbExpanded = false })
+                                DropdownMenuItem(text = { Text("$min 分", fontSize = 16.sp) }, onClick = { viewModel.updateRingBuffer(min); rbExpanded = false })
                             }
                         }
                     }
@@ -678,15 +713,15 @@ fun SettingsContent(
 
                 // GPS記録間隔
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("GPS記録間隔", fontSize = 14.sp, color = Color.White)
+                    Text("GPS記録間隔", fontSize = 16.sp, color = Color.White)
                     var gpsExpanded by remember { mutableStateOf(false) }
                     Box {
                         OutlinedButton(onClick = { gpsExpanded = true }, enabled = !isRecording) {
-                            Text("${config.gpsIntervalSeconds} 秒")
+                            Text("${config.gpsIntervalSeconds} 秒", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                         DropdownMenu(expanded = gpsExpanded, onDismissRequest = { gpsExpanded = false }) {
                             listOf(5L, 10L, 30L, 60L).forEach { sec ->
-                                DropdownMenuItem(text = { Text("$sec 秒") }, onClick = { viewModel.updateGpsInterval(sec); gpsExpanded = false })
+                                DropdownMenuItem(text = { Text("$sec 秒", fontSize = 16.sp) }, onClick = { viewModel.updateGpsInterval(sec); gpsExpanded = false })
                             }
                         }
                     }
@@ -694,13 +729,13 @@ fun SettingsContent(
             }
         }
 
-        // 2. ライドデータ（セクション名変更 ＆ シンプルボタン名「共有」「削除」）
+        // 2. ライドデータ
         Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(text = "ライドデータ", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(text = "ライドデータ", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White)
                 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("CSVデバッグ出力", fontSize = 14.sp, color = Color.White)
+                    Text("CSVデバッグ出力", fontSize = 16.sp, color = Color.White)
                     Switch(
                         checked = config.approachCsvEnabled,
                         onCheckedChange = { viewModel.updateApproachCsvEnabled(it) },
@@ -711,21 +746,21 @@ fun SettingsContent(
                 Spacer(modifier = Modifier.height(6.dp))
                 Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Button(
                         onClick = onShowShareModal,
-                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
                     ) {
-                        Text("共有", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text("共有", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
                     Button(
                         onClick = onShowDeleteDialog,
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                        modifier = Modifier.fillMaxWidth().height(44.dp)
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
                     ) {
-                        Text("削除", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text("削除", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

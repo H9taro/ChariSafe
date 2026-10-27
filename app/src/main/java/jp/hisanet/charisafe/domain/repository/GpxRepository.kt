@@ -8,4 +8,5 @@ interface GpxRepository {
     fun startLogging(intervalSeconds: Long)
     fun stopLogging()
     fun getActiveGpxFilePath(): String?
+    fun clearAll()
 }
