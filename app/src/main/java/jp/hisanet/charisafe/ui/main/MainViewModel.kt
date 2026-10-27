@@ -162,8 +162,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val dateFormatter = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         val grouped = sortedTimeline.groupBy { dateFormatter.format(Date(it.timestampMs)) }
 
-        val activeStart = if (sessionStart > 0L) sessionStart else (summaries.firstOrNull()?.startTimeMs ?: System.currentTimeMillis())
-        val totalActiveSec = ((System.currentTimeMillis() - activeStart) / 1000L).coerceAtLeast(0L)
+        val activeStart = if (sessionStart > 0L) sessionStart else (rideStartTimeMs.takeIf { it > 0L } ?: System.currentTimeMillis())
+        val totalActiveSec = if (sessionStart > 0L || rideStartTimeMs > 0L) ((System.currentTimeMillis() - activeStart) / 1000L).coerceAtLeast(0L) else 0L
         val hours = if (totalActiveSec > 0) totalActiveSec / 3600.0 else 1.0
         val pointsCopy = synchronized(recordedPoints) { recordedPoints.toList() }
         var totalDistKm = 0.0
@@ -197,9 +197,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val currentSpeed = gpxPoint?.speedKmh ?: 0f
-        val approachVal = (currentSpeed * 1.5f).coerceIn(30f, 100f)
-        val decelVal = (1.0f + (currentSpeed % 3.0f)).coerceIn(1.0f, 4.0f)
-        val gVal = (2.0f + (currentSpeed % 2.5f)).coerceIn(2.0f, 5.0f)
+        val approachVal = (0.3f + (currentSpeed / 100f) * 0.7f).coerceIn(0.3f, 1.0f)
+        val decelVal = (1.0f + (currentSpeed / 15f)).coerceIn(1.0f, 4.0f)
+        val gVal = (2.0f + (currentSpeed / 20f)).coerceIn(2.0f, 5.0f)
         val soundVal = (1000f + (currentSpeed * 200f)).coerceIn(1000f, 10000f)
 
         val liveSummary = RideSummary(
