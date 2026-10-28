@@ -509,22 +509,65 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteCurrentRide() {
-        viewModelScope.launch {
-            eventLogRepository.clearAll()
-            gpxRepository.clearAll()
-            synchronized(recordedPoints) {
-                recordedPoints.clear()
-            }
-            rideStartTimeMs = 0L
-            _sessionStartTimeMs.value = 0L
-            _currentRideSummary.value = null
+        viewModelScope.launch(Dispatchers.IO) {
             try {
-                val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir(getApplication())
-                recordingsDir.listFiles()?.forEach { it.delete() }
-                loadExistingEvents()
-                Log.i(TAG, "Current ride data successfully deleted and fully reset to 0")
+                val context = getApplication<Application>()
+
+                // 1. 検出ログ・インシデントログ・ライドサマリーストアのクリア
+                eventLogRepository.clearAll()
+                RideSummaryStore.saveSummaries(context, emptyList())
+
+                // 2. メモリ上の GPX ポイントのクリア
+                gpxRepository.clearAll()
+                synchronized(recordedPoints) {
+                    recordedPoints.clear()
+                }
+                rideStartTimeMs = 0L
+                _sessionStartTimeMs.value = 0L
+                _currentRideSummary.value = null
+
+                // 3. recordings フォルダの全削除 ＆ 再作成
+                val recordingsDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir(context)
+                if (recordingsDir.exists()) {
+                    recordingsDir.deleteRecursively()
+                }
+                recordingsDir.mkdirs()
+
+                // 4. ring_buffer フォルダの全削除 ＆ 再作成
+                val ringBufferDir = jp.hisanet.charisafe.util.FileUtils.getRingBufferDir(context)
+                if (ringBufferDir.exists()) {
+                    ringBufferDir.deleteRecursively()
+                }
+                ringBufferDir.mkdirs()
+
+                // 5. gpx フォルダの全削除 ＆ 再作成
+                val gpxDir = jp.hisanet.charisafe.util.FileUtils.getGpxDir(context)
+                if (gpxDir.exists()) {
+                    gpxDir.deleteRecursively()
+                }
+                gpxDir.mkdirs()
+
+                // 6. debug フォルダ（CSV等）の全削除 ＆ 再作成
+                val debugDir = context.getExternalFilesDir("debug") ?: File(context.filesDir, "debug")
+                if (debugDir.exists()) {
+                    debugDir.deleteRecursively()
+                }
+                debugDir.mkdirs()
+
+                // 7. キャッシュ内の一時ZIPファイルの削除
+                context.cacheDir.listFiles { _, name -> name.endsWith(".zip") }?.forEach { it.delete() }
+
+                withContext(Dispatchers.Main) {
+                    loadExistingEvents()
+                    loadRideSummaries()
+                    android.widget.Toast.makeText(context, "🗑️ 現在ライドのデータをすべて削除しました（設定は維持されます）", android.widget.Toast.LENGTH_SHORT).show()
+                    Log.i(TAG, "Current ride data completely cleaned up. Settings retained.")
+                }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to delete current ride data", e)
+                Log.e(TAG, "Failed to completely delete current ride data", e)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(getApplication(), "削除失敗: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
