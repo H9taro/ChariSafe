@@ -202,11 +202,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             movingSec = totalActiveSec
         }
 
-        val currentSpeed = gpxPoint?.speedKmh ?: 0f
-        val approachVal = (0.3f + (currentSpeed / 100f) * 0.7f).coerceIn(0.3f, 1.0f)
-        val decelVal = (1.0f + (currentSpeed / 15f)).coerceIn(1.0f, 4.0f)
-        val gVal = (2.0f + (currentSpeed / 20f)).coerceIn(2.0f, 5.0f)
-        val soundVal = (1000f + (currentSpeed * 200f)).coerceIn(1000f, 10000f)
+        val now = System.currentTimeMillis()
+        val latestDet = detections.firstOrNull()
+        val isRecentEvent = latestDet != null && (now - latestDet.timestampMs < 2000L)
+
+        val approachVal = if (isRecentEvent && latestDet?.eventType == EventType.APPROACH) {
+            (latestDet.sensitivityValue * 100f).coerceIn(30f, 100f)
+        } else {
+            ((gpxPoint?.speedKmh ?: 0f) * 1.5f).coerceIn(30f, 100f)
+        }
+
+        val decelVal = if (isRecentEvent && latestDet?.eventType == EventType.DECELERATION) {
+            latestDet.sensitivityValue.coerceIn(1.0f, 4.0f)
+        } else {
+            1.0f
+        }
+
+        val gVal = if (isRecentEvent && latestDet?.eventType == EventType.COLLISION) {
+            latestDet.sensitivityValue.coerceIn(2.0f, 5.0f)
+        } else {
+            2.0f
+        }
+
+        val soundVal = if (isRecentEvent && latestDet?.eventType == EventType.SOUND) {
+            latestDet.sensitivityValue.coerceIn(1000f, 10000f)
+        } else {
+            1000f
+        }
 
         val liveSummary = RideSummary(
             startTimeMs = activeStart,
