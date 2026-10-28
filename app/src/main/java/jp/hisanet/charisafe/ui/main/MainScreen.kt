@@ -494,10 +494,9 @@ fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState:
                                     },
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Text(
                                         text = "🎥 動画  ${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(inc.timestampMs))}",
@@ -505,6 +504,8 @@ fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState:
                                         fontSize = 16.sp,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
+                                    val statusText = if (inc.status == IncidentStatus.PENDING) " (保護中...)" else ""
+                                    Text(text = "トリガー: ${inc.triggerEventType.emoji} ${inc.triggerEventType.displayName}$statusText", fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
                                 }
                             }
                         }

@@ -112,7 +112,10 @@ class RecordingService : Service(), LifecycleOwner {
     private var approachDebugLogger: ApproachDebugLogger? = null
     private var audioDebugLogger: AudioDebugLogger? = null
     private var collisionDebugLogger: CollisionDebugLogger? = null
+    private var traceLogger: jp.hisanet.charisafe.data.debug.TraceLogger? = null
     private var recordingStartTimeMs: Long = 0L
+
+    private val activeSegments = java.util.Collections.synchronizedMap(mutableMapOf<String, RecordingSegment>())
 
     private val eventCoordinator = EventCoordinator()
     private val configRepository: ConfigRepository by lazy { ConfigRepositoryImpl(this) }
@@ -156,6 +159,7 @@ class RecordingService : Service(), LifecycleOwner {
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
 
         ringBufferManager = RingBufferManager(this, ringBufferMinutes)
+        traceLogger = jp.hisanet.charisafe.data.debug.TraceLogger(this)
         createNotificationChannel()
         DebugLogCleanupManager.cleanOldLogs(this)
         approachDebugLogger = ApproachDebugLogger(this)
@@ -497,20 +501,110 @@ class RecordingService : Service(), LifecycleOwner {
             }
 
             val currentFilePath = _serviceState.value.currentFile
-            // 1. すでに書き込みが完了している過去セグメントのパスリストを取得して即時保護
-            val completedPaths = ringBufferManager?.protectSegmentsForEvent(currentFilePath) ?: emptyList()
-            val coveredFiles = mutableListOf<String>()
-            coveredFiles.addAll(completedPaths)
+            val currentFileObj = File(currentFilePath)
+            val currentSegmentName = if (currentFileObj.exists()) currentFileObj.name else ""
+            detectionLog.segmentName = currentSegmentName
 
-            // 2. 現行セグメント（書き込み中）を保護予約対象として追加
-            if (currentFilePath.isNotEmpty()) {
-                val curFile = File(currentFilePath)
-                if (curFile.exists()) {
-                    coveredFiles.add(curFile.absolutePath)
+            // 1. 一世代前のセグメント（完了済み）を取得して即時保護を試みる
+            val previousCompletedFile = ringBufferManager?.getPreviousCompletedSegmentFile(currentFilePath)
+            val coveredFiles = mutableListOf<String>()
+
+            if (previousCompletedFile != null) {
+                var prevSeg = activeSegments[previousCompletedFile.name]
+                if (prevSeg == null) {
+                    prevSeg = RecordingSegment(
+                        segmentName = previousCompletedFile.name,
+                        filePath = previousCompletedFile.absolutePath,
+                        startTimeMs = previousCompletedFile.lastModified() - 60_000L,
+                        endTimeMs = previousCompletedFile.lastModified(),
+                        isProtected = false
+                    )
+                    activeSegments[previousCompletedFile.name] = prevSeg
+                }
+
+                // ケース1: 一世代前セグメントが未保護 ➔ 即時保護 ＆ 即時通知
+                if (!prevSeg.isProtected) {
+                    try {
+                        val recordingsDir = FileUtils.getRecordingsDir(this@RecordingService)
+                        val destFile = File(recordingsDir, previousCompletedFile.name)
+                        previousCompletedFile.copyTo(destFile, overwrite = true)
+                        prevSeg.isProtected = true
+                        MediaScannerConnection.scanFile(this@RecordingService, arrayOf(destFile.absolutePath), null, null)
+                        coveredFiles.add(destFile.absolutePath)
+
+                        traceLogger?.logProtectionTrace(
+                            SegmentProtectionTraceEntry(
+                                segmentName = prevSeg.segmentName,
+                                isProtected = true,
+                                pendingProtection = false,
+                                triggerEventType = eventType.name,
+                                protectionReason = ProtectionReason.PREVIOUS_SEGMENT_AUTO_PROTECTION,
+                                notificationSent = true,
+                                operationSucceeded = true,
+                                associatedEventId = detectionLog.id
+                            )
+                        )
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to copy previous segment", e)
+                        traceLogger?.logProtectionTrace(
+                            SegmentProtectionTraceEntry(
+                                segmentName = prevSeg.segmentName,
+                                isProtected = false,
+                                pendingProtection = false,
+                                triggerEventType = eventType.name,
+                                protectionReason = ProtectionReason.PREVIOUS_SEGMENT_AUTO_PROTECTION,
+                                notificationSent = false,
+                                operationSucceeded = false,
+                                failureReason = ProtectionFailureReason.FILE_COPY_FAILED,
+                                associatedEventId = detectionLog.id
+                            )
+                        )
+                    }
+                } else {
+                    // ケース2: 一世代前セグメントがすでに保護済み ➔ 追加通知・保護はスキップ (通知スパム抑制)
+                    coveredFiles.add(File(FileUtils.getRecordingsDir(this@RecordingService), previousCompletedFile.name).absolutePath)
+                    traceLogger?.logProtectionTrace(
+                        SegmentProtectionTraceEntry(
+                            segmentName = prevSeg.segmentName,
+                            isProtected = true,
+                            pendingProtection = false,
+                            triggerEventType = eventType.name,
+                            protectionReason = ProtectionReason.ALREADY_PROTECTED_SKIP,
+                            notificationSent = false,
+                            operationSucceeded = true,
+                            associatedEventId = detectionLog.id
+                        )
+                    )
                 }
             }
-            val candidateSet = coveredFiles.toSet()
 
+            // 2. 現行セグメント（書き込み中）に保護予約フラグを立てる
+            if (currentSegmentName.isNotEmpty()) {
+                val curSeg = activeSegments.getOrPut(currentSegmentName) {
+                    RecordingSegment(
+                        segmentName = currentSegmentName,
+                        filePath = currentFilePath,
+                        startTimeMs = now
+                    )
+                }
+                curSeg.pendingProtection = true
+                coveredFiles.add(currentFilePath)
+
+                traceLogger?.logProtectionTrace(
+                    SegmentProtectionTraceEntry(
+                        segmentName = currentSegmentName,
+                        isProtected = curSeg.isProtected,
+                        pendingProtection = true,
+                        triggerEventType = eventType.name,
+                        protectionReason = ProtectionReason.PENDING_PROTECTION_SET,
+                        notificationSent = false,
+                        operationSucceeded = true,
+                        associatedEventId = detectionLog.id
+                    )
+                )
+            }
+
+            val candidateSet = coveredFiles.toSet()
             val existingIncidents = IncidentLogStore.loadIncidents(this@RecordingService).toMutableList()
 
             // インシデント統合判定
@@ -583,13 +677,12 @@ class RecordingService : Service(), LifecycleOwner {
                 Log.i(TAG, "✨ 新規PENDINGインシデントウィンドウ作成: ${newIncident.id}")
             }
 
-            // 【即時通知判定】前セグメント（すでに書き込み完了しているファイル）が含まれている場合は即時通知発報
-            if (completedPaths.isNotEmpty()) {
-                val lastPath = completedPaths.last()
-                val incToNotify = existingIncidents.find { it.id == targetIncident?.id ?: activeIncidentWindows.values.firstOrNull { w -> w.targetSegmentPaths.contains(lastPath) }?.incidentId }
+            // 一世代前セグメントが保護された場合のみ即時通知を発報
+            if (previousCompletedFile != null && activeSegments[previousCompletedFile.name]?.isProtected == true) {
+                val incToNotify = existingIncidents.find { it.id == targetIncident?.id ?: activeIncidentWindows.values.firstOrNull { w -> w.targetSegmentPaths.contains(previousCompletedFile.absolutePath) }?.incidentId }
                 if (incToNotify != null) {
                     showRecordingCompletionNotification(incToNotify)
-                    Log.i(TAG, "🔔 前セグメント即時保護のため、即時通知を発行しました: ${incToNotify.id}")
+                    Log.i(TAG, "🔔 一世代前セグメント即時保護通知を発報しました: ${incToNotify.id}")
                 }
             }
         }
@@ -631,6 +724,46 @@ class RecordingService : Service(), LifecycleOwner {
 
                     serviceScope.launch(Dispatchers.IO) {
                         val finalizedFile = File(filePath)
+                        val seg = activeSegments[finalizedFile.name]
+
+                        if (seg != null && seg.pendingProtection) {
+                            try {
+                                val recordingsDir = FileUtils.getRecordingsDir(this@RecordingService)
+                                val destFile = File(recordingsDir, finalizedFile.name)
+                                finalizedFile.copyTo(destFile, overwrite = true)
+                                seg.isProtected = true
+                                seg.pendingProtection = false
+                                seg.endTimeMs = finalizedFile.lastModified()
+                                MediaScannerConnection.scanFile(this@RecordingService, arrayOf(destFile.absolutePath), null, null)
+
+                                traceLogger?.logProtectionTrace(
+                                    SegmentProtectionTraceEntry(
+                                        segmentName = seg.segmentName,
+                                        isProtected = true,
+                                        pendingProtection = false,
+                                        triggerEventType = "FINALIZE",
+                                        protectionReason = ProtectionReason.PENDING_PROTECTION_FINALIZED,
+                                        notificationSent = true,
+                                        operationSucceeded = true
+                                    )
+                                )
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to copy finalized segment", e)
+                                traceLogger?.logProtectionTrace(
+                                    SegmentProtectionTraceEntry(
+                                        segmentName = seg.segmentName,
+                                        isProtected = false,
+                                        pendingProtection = true,
+                                        triggerEventType = "FINALIZE",
+                                        protectionReason = ProtectionReason.PENDING_PROTECTION_FINALIZED,
+                                        notificationSent = false,
+                                        operationSucceeded = false,
+                                        failureReason = ProtectionFailureReason.FILE_COPY_FAILED
+                                    )
+                                )
+                            }
+                        }
+
                         val iterator = activeIncidentWindows.iterator()
                         val incidents = IncidentLogStore.loadIncidents(this@RecordingService).toMutableList()
 

@@ -46,6 +46,26 @@ class RingBufferManager(private val context: Context, private val ringBufferMinu
         }
     }
 
+    fun getPreviousCompletedSegmentFile(currentSegmentPath: String): File? {
+        val dir = FileUtils.getRingBufferDir(context)
+        try {
+            val currentFile = File(currentSegmentPath)
+            val files = dir.listFiles { _, name -> name.startsWith("seg_") && name.endsWith(".mp4") }
+                ?.filter { file ->
+                    file.exists() && 
+                    file.length() > 50 * 1024 && 
+                    file.absolutePath != currentFile.absolutePath
+                }
+                ?.sortedBy { it.lastModified() }
+                ?: emptyList()
+
+            return files.lastOrNull()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get previous completed segment file", e)
+        }
+        return null
+    }
+
     /**
      * イベント発生時に、すでに書き込みとファイナライズ（クローズ）が完了している
      * 「過去の完了済みセグメントファイル（最新1〜2本）」のみを安全に抽出して保護する。

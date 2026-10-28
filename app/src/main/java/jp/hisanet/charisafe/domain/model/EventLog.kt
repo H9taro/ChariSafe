@@ -19,7 +19,8 @@ data class EventDetectionLog(
     val sensitivityValue: Float,           // 生数値
     val sensitivityLabel: String,          // フォーマット済み表示文字列 ("感度: 70%", "1.5秒", "3.0G", "振幅: 5000")
     val sensitivitySnapshot: EventSensitivity = EventSensitivity(),
-    var incidentId: String? = null         // 紐付けられた IncidentLog ID
+    var incidentId: String? = null,        // 紐付けられた IncidentLog ID
+    var segmentName: String = ""           // 発生時に録画中だったセグメント名 (例: seg_002.mp4)
 )
 
 enum class IncidentStatus(val displayName: String) {
