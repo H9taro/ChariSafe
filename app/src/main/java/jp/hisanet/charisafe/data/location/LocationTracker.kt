@@ -27,23 +27,38 @@ class LocationTracker(context: Context) {
     private val _currentLocation = MutableStateFlow<GpxPoint?>(null)
     val currentLocation: StateFlow<GpxPoint?> = _currentLocation.asStateFlow()
 
+    private var previousLocation: Location? = null
+
     private val locationListener by lazy {
         object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                val speedKmh = if (location.hasSpeed()) location.speed * 3.6f else 0f
+                var speedKmh = if (location.hasSpeed()) location.speed * 3.6f else 0f
+
+                // フォールバック: hasSpeed() がない場合や0の場合、前回位置との差分から速度を計算
+                if (speedKmh < 0.5f && previousLocation != null) {
+                    val distMeters = previousLocation!!.distanceTo(location)
+                    val timeDeltaSec = (location.time - previousLocation!!.time) / 1000f
+                    if (timeDeltaSec > 0.1f) {
+                        val calcMs = distMeters / timeDeltaSec
+                        speedKmh = (calcMs * 3.6f).coerceAtLeast(0f)
+                    }
+                }
+
+                previousLocation = location
+
                 val point = GpxPoint(
                     latitude = location.latitude,
                     longitude = location.longitude,
                     elevation = if (location.hasAltitude()) location.altitude else 0.0,
                     speedKmh = speedKmh,
-                    timestampMs = location.time
+                    timestampMs = if (location.time > 0) location.time else System.currentTimeMillis()
                 )
                 _currentLocation.value = point
                 lastValidLatitude = location.latitude
                 lastValidLongitude = location.longitude
                 lastValidSpeedKmh = speedKmh
-                lastLocationTimestampMs = location.time
-                Log.i(TAG, "🟢 FRESH GPS/Network Location updated: lat=${point.latitude}, lon=${point.longitude}, speed=${point.speedKmh} km/h")
+                lastLocationTimestampMs = point.timestampMs
+                Log.i(TAG, "🟢 FRESH GPS Location: lat=${point.latitude}, lon=${point.longitude}, speed=${point.speedKmh} km/h")
             }
 
             override fun onProviderEnabled(provider: String) {}
@@ -73,6 +88,7 @@ class LocationTracker(context: Context) {
                     lastValidSpeedKmh = bestLastKnown.speed * 3.6f
                 }
                 lastLocationTimestampMs = bestLastKnown.time
+                previousLocation = bestLastKnown
                 Log.i(TAG, "Initialized lastValidLocation from system provider: lat=$lastValidLatitude, lon=$lastValidLongitude")
             }
 
@@ -114,6 +130,7 @@ class LocationTracker(context: Context) {
         if (!isTracking) return
         try {
             locationManager.removeUpdates(locationListener)
+            previousLocation = null
             isTracking = false
             Log.i(TAG, "Stopped location tracking")
         } catch (e: Exception) {

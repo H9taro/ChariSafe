@@ -187,7 +187,7 @@ fun MainScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(onClick = { viewModel.shareAllData(); showShareModal = false }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                        Text("すべて共有", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text("すべて共有 (ZIP)", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
                     Button(onClick = { viewModel.shareLogsOnly(); showShareModal = false }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
                         Text("ログのみ共有", fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -205,10 +205,29 @@ fun MainScreen(
             }
         )
     }
+
+    // ZIP生成中ローディングダイアログ
+    if (uiState.isZipGenerating) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("📦 ZIPファイル生成中", fontSize = 20.sp, fontWeight = FontWeight.Bold) },
+            text = {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator()
+                    Text("動画およびログを圧縮しています...\nしばらくお待ちください。", fontSize = 15.sp)
+                }
+            },
+            confirmButton = {}
+        )
+    }
 }
 
 /**
- * 🏠 ホーム画面（4種すべてにリアルタイム比較バー完備・AStargazerシャッターボタン）
+ * 🏠 ホーム画面
  */
 @Composable
 fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
@@ -253,13 +272,13 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 2. 感度スライダー 4種 ＆ リアルタイム比較バー（スケール完全一致）
+        // 2. 感度スライダー 4種 ＆ リアルタイム比較バー
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // 接近 (スケール: 0.3f..1.0f)
+                // 接近
                 Column {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(text = "接近 ${(uiState.sensitivity.approachSensitivity * 100).toInt()}%", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
@@ -272,14 +291,14 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                         steps = 7
                     )
                     RealtimeComparisonBar(
-                        currentValue = (uiState.currentApproachScore / 100f).coerceIn(0.3f, 1.0f),
-                        thresholdValue = uiState.sensitivity.approachSensitivity,
-                        minValue = 0.3f,
-                        maxValue = 1.0f
+                        currentValue = uiState.currentApproachScore,
+                        thresholdValue = uiState.sensitivity.approachSensitivity * 100f,
+                        minValue = 30f,
+                        maxValue = 100f
                     )
                 }
 
-                // 減速 (スケール: 1.0f..4.0f)
+                // 減速
                 Column {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(text = "減速 ${String.format(Locale.US, "%.1f", uiState.sensitivity.decelerationSensitivity)} m/s²", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
@@ -292,14 +311,14 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                         steps = 29
                     )
                     RealtimeComparisonBar(
-                        currentValue = uiState.currentDecelValue.coerceIn(1.0f, 4.0f),
+                        currentValue = uiState.currentDecelValue,
                         thresholdValue = uiState.sensitivity.decelerationSensitivity,
                         minValue = 1.0f,
                         maxValue = 4.0f
                     )
                 }
 
-                // 衝撃 (スケール: 2.0f..5.0f)
+                // 衝撃
                 Column {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(text = "衝撃 ${String.format(Locale.US, "%.1f", uiState.sensitivity.collisionSensitivity)}G", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
@@ -312,14 +331,14 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                         steps = 15
                     )
                     RealtimeComparisonBar(
-                        currentValue = uiState.currentGValue.coerceIn(2.0f, 5.0f),
+                        currentValue = uiState.currentGValue,
                         thresholdValue = uiState.sensitivity.collisionSensitivity,
                         minValue = 2.0f,
                         maxValue = 5.0f
                     )
                 }
 
-                // 音量 (スケール: 1000f..10000f)
+                // 音量
                 Column {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(text = "音量 ${uiState.sensitivity.soundSensitivity.toInt()}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
@@ -332,7 +351,7 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                         steps = 18
                     )
                     RealtimeComparisonBar(
-                        currentValue = uiState.currentSoundAmplitude.coerceIn(1000f, 10000f),
+                        currentValue = uiState.currentSoundAmplitude,
                         thresholdValue = uiState.sensitivity.soundSensitivity,
                         minValue = 1000f,
                         maxValue = 10000f
@@ -343,7 +362,7 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 3. AStargazerスタイルのシャッターボタン
+        // 3. シャッターボタン
         CameraShutterButton(isRecording = isRecording) {
             if (isRecording) viewModel.stopRecording() else viewModel.startRecording()
         }
@@ -351,7 +370,7 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
 }
 
 /**
- * AStargazerプロジェクトスタイルのシャッターボタン形状
+ * シャッターボタン形状
  */
 @Composable
 fun CameraShutterButton(isRecording: Boolean, onClick: () -> Unit) {
@@ -359,7 +378,7 @@ fun CameraShutterButton(isRecording: Boolean, onClick: () -> Unit) {
         modifier = Modifier
             .size(72.dp)
             .background(Color.White, CircleShape)
-            .padding(3.dp), // 外側の白いリング
+            .padding(3.dp),
         contentAlignment = Alignment.Center
     ) {
         Button(
@@ -381,7 +400,7 @@ fun CameraShutterButton(isRecording: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * リアルタイム比較バー（バー長＝現在値、閾値＝縦棒、数値なし、スケール完全一致）
+ * リアルタイム比較バー
  */
 @Composable
 fun RealtimeComparisonBar(
@@ -400,14 +419,12 @@ fun RealtimeComparisonBar(
             .height(10.dp)
             .background(Color.DarkGray, RoundedCornerShape(5.dp))
     ) {
-        // バーの長さ＝センサーの現在値（スライダーとスケール完全一致）
         Box(
             modifier = Modifier
                 .fillMaxWidth(fraction)
                 .fillMaxHeight()
                 .background(if (isExceeding) Color.Red else MaterialTheme.colorScheme.primary, RoundedCornerShape(5.dp))
         )
-        // 閾値は縦棒の位置で表す
         Canvas(modifier = Modifier.fillMaxSize()) {
             val x = size.width * thresholdFraction
             drawLine(
@@ -607,7 +624,7 @@ fun RideResultContent(uiState: MainUiState) {
 }
 
 /**
- * ⚙️ 設定画面
+ * ⚙️ 設定画面（画質・リングバッファ時間・GPS間隔完全対応・1秒追加・詳細案内）
  */
 @Composable
 fun SettingsContent(
@@ -677,7 +694,7 @@ fun SettingsContent(
                     }
                 }
 
-                // 録画解像度
+                // 録画解像度 (640x480, 1280x720, 1920x1080 選択可能)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("録画解像度", fontSize = 16.sp, color = Color.White)
                     var resExpanded by remember { mutableStateOf(false) }
@@ -687,7 +704,13 @@ fun SettingsContent(
                         }
                         DropdownMenu(expanded = resExpanded, onDismissRequest = { resExpanded = false }) {
                             VideoResolution.entries.forEach { res ->
-                                DropdownMenuItem(text = { Text("${res.width}x${res.height}", fontSize = 16.sp) }, onClick = { resExpanded = false })
+                                DropdownMenuItem(
+                                    text = { Text("${res.width}x${res.height}", fontSize = 16.sp) },
+                                    onClick = {
+                                        viewModel.updateResolution(res)
+                                        resExpanded = false
+                                    }
+                                )
                             }
                         }
                     }
@@ -711,7 +734,7 @@ fun SettingsContent(
                     }
                 }
 
-                // GPS記録間隔
+                // GPS記録間隔 (1秒を追加)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("GPS記録間隔", fontSize = 16.sp, color = Color.White)
                     var gpsExpanded by remember { mutableStateOf(false) }
@@ -720,8 +743,14 @@ fun SettingsContent(
                             Text("${config.gpsIntervalSeconds} 秒", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                         DropdownMenu(expanded = gpsExpanded, onDismissRequest = { gpsExpanded = false }) {
-                            listOf(5L, 10L, 30L, 60L).forEach { sec ->
-                                DropdownMenuItem(text = { Text("$sec 秒", fontSize = 16.sp) }, onClick = { viewModel.updateGpsInterval(sec); gpsExpanded = false })
+                            listOf(1L, 5L, 10L, 30L, 60L).forEach { sec ->
+                                DropdownMenuItem(
+                                    text = { Text("$sec 秒", fontSize = 16.sp) },
+                                    onClick = {
+                                        viewModel.updateGpsInterval(sec)
+                                        gpsExpanded = false
+                                    }
+                                )
                             }
                         }
                     }

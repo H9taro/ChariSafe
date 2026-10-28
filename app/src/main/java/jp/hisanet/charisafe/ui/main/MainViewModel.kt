@@ -22,6 +22,7 @@ import jp.hisanet.charisafe.domain.model.IncidentLog
 import jp.hisanet.charisafe.domain.model.RecordingState
 import jp.hisanet.charisafe.domain.model.RideSummary
 import jp.hisanet.charisafe.domain.model.SystemStatus
+import jp.hisanet.charisafe.domain.model.VideoResolution
 import jp.hisanet.charisafe.domain.repository.ConfigRepository
 import jp.hisanet.charisafe.domain.repository.EventLogRepository
 import jp.hisanet.charisafe.domain.repository.GpxRepository
@@ -33,6 +34,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -54,6 +57,7 @@ data class MainUiState(
     val config: AppConfig = AppConfig(),
     val status: SystemStatus = SystemStatus(),
     val isExporting: Boolean = false,
+    val isZipGenerating: Boolean = false,
     val savedEventFiles: List<File> = emptyList(),
     val selectedEventFile: File? = null,
     val eventDetectionLogs: List<EventDetectionLog> = emptyList(),
@@ -102,6 +106,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     )
     private val _currentRideSummary = MutableStateFlow<RideSummary?>(null)
+    private val _isZipGenerating = MutableStateFlow(false)
     private var rideStartTimeMs: Long = 0L
     private val recordedPoints = mutableListOf<jp.hisanet.charisafe.domain.model.GpxPoint>()
 
@@ -117,8 +122,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         },
         combine(_currentRideSummary, _rideSummaries, _sessionStartTimeMs) { currentSum, summaries, sessionStart ->
             Triple(currentSum, summaries, sessionStart)
-        }
-    ) { p1, p2, p3, p4 ->
+        },
+        _isZipGenerating
+    ) { p1, p2, p3, p4, isZipGen ->
         val config = p1.first
         val state = p1.second
         val gpxPoint = p1.third
@@ -225,6 +231,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             config = config,
             status = status,
             isExporting = (state == RecordingState.EXPORTING),
+            isZipGenerating = isZipGen,
             savedEventFiles = files,
             eventDetectionLogs = detections,
             incidentLogs = incidents,
@@ -522,35 +529,93 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun shareAllData() {
-        shareGpxFile()
+    fun updateResolution(resolution: VideoResolution) {
+        val current = configRepository.getConfig()
+        configRepository.updateConfig(current.copy(resolution = resolution))
     }
 
-    fun shareLogsOnly() {
-        shareGpxFile()
-    }
-
-    fun shareVideosOnly() {
+    private fun createAndShareZip(fileName: String, chooserTitle: String, includeVideos: Boolean, includeLogs: Boolean) {
         val context = getApplication<Application>()
-        val recDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir(context)
-        val latest = recDir.listFiles { _, name -> name.endsWith(".mp4") }?.maxByOrNull { it.lastModified() }
-        if (latest != null && latest.exists()) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isZipGenerating.value = true
             try {
-                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", latest)
-                val intent = Intent(Intent.ACTION_SEND).apply {
-                    type = "video/mp4"
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                val zipFile = File(context.cacheDir, fileName)
+                if (zipFile.exists()) zipFile.delete()
+
+                java.util.zip.ZipOutputStream(java.io.FileOutputStream(zipFile)).use { zos ->
+                    if (includeVideos) {
+                        val recDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir(context)
+                        recDir.listFiles()?.forEach { file ->
+                            if (file.isFile && (file.name.endsWith(".mp4") || file.name.endsWith(".mov"))) {
+                                java.io.FileInputStream(file).use { fis ->
+                                    zos.putNextEntry(java.util.zip.ZipEntry("recordings/${file.name}"))
+                                    fis.copyTo(zos, bufferSize = 16384)
+                                    zos.closeEntry()
+                                }
+                            }
+                        }
+                    }
+
+                    if (includeLogs) {
+                        val gpxDir = jp.hisanet.charisafe.util.FileUtils.getGpxDir(context)
+                        gpxDir.listFiles()?.forEach { file ->
+                            if (file.isFile && file.name.endsWith(".gpx")) {
+                                java.io.FileInputStream(file).use { fis ->
+                                    zos.putNextEntry(java.util.zip.ZipEntry("gpx/${file.name}"))
+                                    fis.copyTo(zos, bufferSize = 16384)
+                                    zos.closeEntry()
+                                }
+                            }
+                        }
+                        val debugDir = context.getExternalFilesDir("debug") ?: File(context.filesDir, "debug")
+                        debugDir.listFiles()?.forEach { file ->
+                            if (file.isFile) {
+                                java.io.FileInputStream(file).use { fis ->
+                                    zos.putNextEntry(java.util.zip.ZipEntry("debug_csv/${file.name}"))
+                                    fis.copyTo(zos, bufferSize = 16384)
+                                    zos.closeEntry()
+                                }
+                            }
+                        }
+                    }
+                    zos.flush()
                 }
-                val chooser = Intent.createChooser(intent, "動画データを共有").apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+                withContext(Dispatchers.Main) {
+                    _isZipGenerating.value = false
+                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", zipFile)
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/zip"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    val chooser = Intent.createChooser(intent, chooserTitle).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(chooser)
                 }
-                context.startActivity(chooser)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to share video", e)
+                Log.e(TAG, "Failed to create and share zip: $fileName", e)
+                withContext(Dispatchers.Main) {
+                    _isZipGenerating.value = false
+                }
             }
         }
     }
+
+    fun shareAllData() {
+        createAndShareZip("charisafe_all_data.zip", "ライドデータをすべて共有(ZIP)", includeVideos = true, includeLogs = true)
+    }
+
+    fun shareLogsOnly() {
+        createAndShareZip("charisafe_logs_only.zip", "ログデータをすべて共有(ZIP)", includeVideos = false, includeLogs = true)
+    }
+
+    fun shareVideosOnly() {
+        createAndShareZip("charisafe_videos_only.zip", "録画動画をすべて共有(ZIP)", includeVideos = true, includeLogs = false)
+    }
+
+
 
     fun shareGpxFile() {
         val context = getApplication<Application>()
