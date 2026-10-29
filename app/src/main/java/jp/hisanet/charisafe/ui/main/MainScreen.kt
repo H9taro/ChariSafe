@@ -763,17 +763,7 @@ fun SettingsContent(
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(text = "ライドデータ", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White)
-                
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("CSVデバッグ出力", fontSize = 16.sp, color = Color.White)
-                    Switch(
-                        checked = config.approachCsvEnabled,
-                        onCheckedChange = { viewModel.updateApproachCsvEnabled(it) },
-                        enabled = !isRecording
-                    )
-                }
 
-                Spacer(modifier = Modifier.height(6.dp))
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)

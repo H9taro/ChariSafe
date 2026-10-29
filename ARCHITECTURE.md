@@ -19,7 +19,7 @@ ChariSafe は、バックグラウンドでの安定稼働と省電力性を最�
        ↕
 [ Data Layer ]
    ├── Service (RecordingService: 常時録画・検出制御, EventCoordinator: 保護調停)
-   ├── Detectors (RearApproachDetector, CollisionDropDetector, AudioImpactDetector, PocketStorageDetector, SpeedDecelerationDetector)
+   ├── Detectors (RearApproachDetector, CollisionDropDetector, AudioImpactDetector, SpeedDecelerationDetector)
    ├── Location (LocationTracker)
    └── Storage (RingBufferManager, EventDetectionLogStore, IncidentLogStore, RideSummaryStore, TraceLogger)
 ```
@@ -45,7 +45,7 @@ ChariSafe は、バックグラウンドでの安定稼働と省電力性を最�
 | **Domain - Repository I/F** (`domain.repository`) | `ConfigRepository`<br>`EventLogRepository`<br>`GpxRepository`<br>`RecordingRepository` | データアクセスおよびサービス操作のための抽象インターフェース群 | `data` レイヤーで具現化実装 |
 | **Data - Service** (`data.service`) | `RecordingService` | **バックグラウンド中核処理**。<br>CameraXによる動画録画、リングバッファ切替、各検知器のライフサイクル制御、イベント発生時のセグメント保護発火 | - Intent (`ACTION_START_RECORDING` / `ACTION_STOP_RECORDING`)<br>- Bind (`LocalBinder`)<br>- StateFlow (`ServiceState`) |
 | **Data - Service** (`data.service`) | `EventCoordinator` | イベント発生時のセグメント保護排他制御（ロック）と危険度（Severity）調停 | `RecordingService` 内でスレッドセーフに実行 |
-| **Data - Detectors** (`data.camera`, `data.sensor`, `data.location`) | `RearApproachDetector`<br>`SpeedDecelerationDetector`<br>`CollisionDropDetector`<br>`AudioImpactDetector`<br>`PocketStorageDetector` | カメラ画像解析、GPS速度変化、加速度、マイク音声、近接センサーによる各種危険状態のリアルタイム検知 | 検知時に各種コールバックを発火 (`onApproachDetected`, `onDecelerationDetected` 等) |
+| **Data - Detectors** (`data.camera`, `data.sensor`, `data.location`) | `RearApproachDetector`<br>`SpeedDecelerationDetector`<br>`CollisionDropDetector`<br>`AudioImpactDetector` | カメラ画像解析、GPS速度変化、加速度、マイク音声による各種危険状態のリアルタイム検知 | 検知時に各種コールバックを発火 (`onApproachDetected`, `onDecelerationDetected` 等) |
 | **Data - Location** (`data.location`) | `LocationTracker` | GPS/ネットワークによる位置情報・速度の取得と GPX ポイント化 | StateFlow `currentLocation` |
 | **Data - Local Storage** (`data.local`) | `RingBufferManager`<br>`EventDetectionLogStore`<br>`IncidentLogStore`<br>`RideSummaryStore` | 動画リングバッファ (`seg_*.mp4`) の削除・保護退避、イベント履歴・走行結果の JSON 永続化 | 同期/非同期 ファイル I/O |
 | **Data - Trace** (`data.debug`) | `TraceLogger` | システム全体の動作追跡および不具合分析のための統一トレーサビリティログ出力 | 統合ログ出力 |
@@ -136,7 +136,6 @@ flowchart TD
 | **`SpeedDecelerationDetector`** | `feedPoint()` | `GpxPoint` | `Unit` (内部で検知時コールバック) | `LocationTracker`, `MainViewModel` | コールバック `onDecelerationDetected` |
 | **`CollisionDropDetector`** | `startListening()` / `stopListening()` | 加速度センサーイベント | `Unit` (内部で検知時コールバック) | `RecordingService` | コールバック `onCollisionOrDropDetected` |
 | **`AudioImpactDetector`** | `startListening()` / `stopListening()` | マイク PCM 音声ストリーム | `Unit` (内部で検知時コールバック) | `RecordingService` | コールバック `onLoudSoundDetected` |
-| **`PocketStorageDetector`** | `startListening()` / `stopListening()` | 近接センサーイベント | `Unit` (内部で状態変更時コールバック) | `RecordingService` | コールバック `onPocketStateChanged` |
 
 ---
 
@@ -177,7 +176,6 @@ flowchart TD
 | **`onDecelerationDetected`** | `SpeedDecelerationDetector` | `RecordingService` | なし (`Unit`) | GPS速度低下から急減速条件が連続成立した時 |
 | **`onCollisionOrDropDetected`** | `CollisionDropDetector` | `RecordingService` | なし (`Unit`) | 加速度センサーで一定G以上の衝撃・落下を検知した時 |
 | **`onLoudSoundDetected`** | `AudioImpactDetector` | `RecordingService` | なし (`Unit`) | マイク音声振幅が設定値を超えた時 |
-| **`onPocketStateChanged`** | `PocketStorageDetector` | `RecordingService` | `isStored: Boolean` | 近接センサーでスマホがポケット等に収納/取り出しされた時 |
 | **`onLocationChanged`** | Android OS (`LocationManager`) | `LocationTracker` | `location: Location` | GPS / ネットワークからの位置情報更新時 |
 
 ---
@@ -291,10 +289,9 @@ flowchart TD
 | **ライフサイクル & 前景登録** | Foreground Service（`FOREGROUND_SERVICE_TYPE_CAMERA`）の起動・停止、通知表示、スリープ防止 WakeLock の維持管理。 | `onStartCommand`, `startForegroundWithNotification`, `acquireWakeLock`, `releaseWakeLock` |
 | **CameraX 録画パイプライン** | バックグラウンドでの CameraX セッション構築、目標FPS（10fps）の指定、ImageAnalysis（後方接近検知）との同期実行、動画出力。 | `startRecordingPipeline`, `setupVideoCaptureAndStart`, `startVideoFileOutput`, `stopRecordingPipeline` |
 | **セグメント自動ローテーション** | Coroutine タイマーにより 1 分ごとに循環動画セグメント (`seg_*.mp4`) の切り替え・作成を実行。 | `startSegmentRotationTimer`, `stopSegmentRotationTimer` |
-| **センサー検知器統括** | 加速度、マイク、近接、カメラの各 Detector の登録・監視・停止を集中制御。 | `pocketStorageDetector`, `collisionDropDetector`, `audioImpactDetector` の起動/停止 |
+| **センサー検知器統括** | 加速度、マイク、カメラの各 Detector の登録・監視・停止を集中制御。 | `collisionDropDetector`, `audioImpactDetector` の起動/停止 |
 | **イベント検出 & 保護排他制御** | 各 Detector からのイベント通知を受信。`EventCoordinator` を使用した保護排他ロックおよび動画セグメント退避コピーの実行。 | `handleDetectedEvent`, `EventCoordinator.executeWithProtection` |
 | **通知・警告音制御** | イベント発生時のビープ警告音発報、および保護完了時の OS 通知発行。 | `toneGenerator`, `showRecordingCompletionNotification` |
-| **省電力制御** | ポケット収納状態に応じて録画 FPS を動的変更（通常 10fps ↔ ポケット時 5fps）。 | `pocketStorageDetector` コールバック処理 |
 
 ---
 
@@ -433,7 +430,6 @@ flowchart TD
 | **`SpeedDecelerationDetector`** | `GpxPoint`<br>(速度 km/h, 時間 ms) | 速度を m/s に換算後、EMA平滑化 (α=0.35)。時間差分から減速度 `(v_prev - v_curr) / dt` [m/s²] を計算。 | - 平滑化係数: `0.35`<br>- 減速閾値: `1.0 〜 4.0 m/s²`<br>- 連続超過数: `>= 2 回` | `onDecelerationDetected` |
 | **`CollisionDropDetector`** | 加速度 `SensorEvent`<br>(TYPE_ACCELEROMETER) | 3軸合成加速度 `sqrt(x²+y²+z²)` を計算し重力加速度 (9.81 m/s²) で割って G換算。 | - 衝撃判定閾値: `>= 3.0 G`<br>- 重力加速度: `9.81 m/s²` | `onCollisionOrDropDetected` |
 | **`AudioImpactDetector`** | マイク PCM 16bit 音声<br>(`AudioRecord`, 8kHz) | ShortArrayバッファの振幅絶対値の最大値 `maxAmplitude` を検出。接近警告音鳴動中はミュート。 | - サンプリングレート: `8000 Hz`<br>- 設定振幅閾値: `1000 〜 32767`<br>- 一時ミュートフラグ: `isMuted` | `onLoudSoundDetected` |
-| **`PocketStorageDetector`** | 近接 `SensorEvent`<br>(TYPE_PROXIMITY) | 近接センサー距離値からスマホのポケット等への収納状態を検知。 | - 判定条件: `distance < maxRange && distance == 0.0f` | `onPocketStateChanged` |
 
 ---
 

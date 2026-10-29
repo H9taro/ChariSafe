@@ -490,34 +490,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         configRepository.updateConfig(current.copy(clearPreviousLogsAndVideosOnStart = clear))
     }
 
-    fun updateApproachCsvEnabled(enabled: Boolean) {
-        val current = configRepository.getConfig()
-        configRepository.updateConfig(current.copy(approachCsvEnabled = enabled))
-    }
-
-    fun updateAudioCsvEnabled(enabled: Boolean) {
-        val current = configRepository.getConfig()
-        configRepository.updateConfig(current.copy(audioCsvEnabled = enabled))
-    }
-
-    fun updateDecelerationCsvEnabled(enabled: Boolean) {
-        val current = configRepository.getConfig()
-        configRepository.updateConfig(current.copy(decelerationCsvEnabled = enabled))
-    }
-
-    fun updateCollisionCsvEnabled(enabled: Boolean) {
-        val current = configRepository.getConfig()
-        configRepository.updateConfig(current.copy(collisionCsvEnabled = enabled))
-    }
-
-    fun shareDebugLogs() {
-        jp.hisanet.charisafe.data.debug.DebugLogShareManager.shareDebugLogs(getApplication())
-    }
-
-    fun deleteDebugLogs() {
-        jp.hisanet.charisafe.data.debug.DebugLogShareManager.deleteDebugLogs(getApplication())
-    }
-
     fun deleteRideSummary(summary: RideSummary) {
         viewModelScope.launch {
             val currentList = _rideSummaries.value.toMutableList()
@@ -678,48 +650,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun shareVideosOnly() {
         createAndShareZip("charisafe_videos_only.zip", "録画動画をすべて共有(ZIP)", includeVideos = true, includeLogs = false)
-    }
-
-
-
-    fun shareGpxFile() {
-        val context = getApplication<Application>()
-        var gpxFile: File? = null
-
-        val activePath = gpxRepository.getActiveGpxFilePath()
-        if (!activePath.isNullOrEmpty()) {
-            val f = File(activePath)
-            if (f.exists() && f.length() > 0) {
-                gpxFile = f
-            }
-        }
-
-        if (gpxFile == null) {
-            val gpxDir = jp.hisanet.charisafe.util.FileUtils.getGpxDir(context)
-            val files = gpxDir.listFiles { _, name -> name.endsWith(".gpx") }
-                ?.sortedByDescending { it.lastModified() }
-            if (!files.isNullOrEmpty()) {
-                gpxFile = files.first()
-            }
-        }
-
-        if (gpxFile != null && gpxFile.exists() && gpxFile.length() > 0) {
-            try {
-                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", gpxFile)
-                val intent = Intent(Intent.ACTION_SEND).apply {
-                    type = "application/gpx+xml"
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                val chooser = Intent.createChooser(intent, "GPXログを共有").apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                context.startActivity(chooser)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to share GPX file", e)
-            }
-        } else {
-            Log.w(TAG, "No valid GPX file found to share")
-        }
     }
 }

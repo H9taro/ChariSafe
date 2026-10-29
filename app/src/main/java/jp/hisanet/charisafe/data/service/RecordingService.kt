@@ -51,10 +51,8 @@ import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
 import jp.hisanet.charisafe.data.location.LocationTracker
 import jp.hisanet.charisafe.data.sensor.AudioImpactDetector
 import jp.hisanet.charisafe.data.sensor.CollisionDropDetector
-import jp.hisanet.charisafe.data.sensor.PocketStorageDetector
 import jp.hisanet.charisafe.domain.model.*
 import jp.hisanet.charisafe.domain.repository.ConfigRepository
-import jp.hisanet.charisafe.poc.PocMetricsLogger
 import jp.hisanet.charisafe.util.FileUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -106,7 +104,6 @@ class RecordingService : Service(), LifecycleOwner {
     private var imageAnalysis: ImageAnalysis? = null
     private var activeRecording: Recording? = null
     private var ringBufferManager: RingBufferManager? = null
-    private var pocketStorageDetector: PocketStorageDetector? = null
     private var collisionDropDetector: CollisionDropDetector? = null
     private var audioImpactDetector: AudioImpactDetector? = null
     private var approachDebugLogger: ApproachDebugLogger? = null
@@ -128,8 +125,6 @@ class RecordingService : Service(), LifecycleOwner {
     private var resHeight: Int = 720
     private var audioEnabled: Boolean = true
 
-    private var metricsLogger: PocMetricsLogger? = null
-    private var metricsJob: Job? = null
     private var rotationJob: Job? = null
 
     private val analysisExecutor = Executors.newSingleThreadExecutor()
@@ -165,16 +160,6 @@ class RecordingService : Service(), LifecycleOwner {
         approachDebugLogger = ApproachDebugLogger(this)
         audioDebugLogger = AudioDebugLogger(this)
         collisionDebugLogger = CollisionDebugLogger(this)
-
-        pocketStorageDetector = PocketStorageDetector(this) { isStored ->
-            if (isStored) {
-                Log.w(TAG, "👝 [Priority3] ポケット収納検知: 省電力モードのためFPSを5fpsにスロットリングします")
-                targetFps = 5
-            } else {
-                Log.i(TAG, "☀️ [Priority3] ポケットから取り出されました: 通常FPS ($userConfigFps fps) に復帰します")
-                targetFps = userConfigFps
-            }
-        }
 
         collisionDropDetector = CollisionDropDetector(this, collisionDebugLogger) {
             val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
@@ -220,14 +205,12 @@ class RecordingService : Service(), LifecycleOwner {
                 recordingStartTimeMs = System.currentTimeMillis()
                 startForegroundWithNotification()
                 acquireWakeLock()
-                pocketStorageDetector?.startListening()
                 collisionDropDetector?.startListening()
                 audioImpactDetector?.startListening()
                 startRecordingPipeline()
                 startSegmentRotationTimer()
             }
             ACTION_STOP_RECORDING -> {
-                pocketStorageDetector?.stopListening()
                 collisionDropDetector?.stopListening()
                 audioImpactDetector?.stopListening()
                 stopRecordingPipeline()
@@ -332,8 +315,6 @@ class RecordingService : Service(), LifecycleOwner {
         }
 
         ringBufferManager?.clearAll()
-        metricsLogger = PocMetricsLogger(this, "ChariSafe-${targetFps}fps")
-        metricsLogger?.startSession()
 
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
@@ -425,8 +406,6 @@ class RecordingService : Service(), LifecycleOwner {
         activeRecording = pendingRecording.start(ContextCompat.getMainExecutor(this)) { event ->
             handleRecordEvent(event, segmentFile.absolutePath)
         }
-
-        startMetricsLoggingJob()
     }
 
     fun triggerAutoEventWithAlert(reason: String) {
@@ -805,21 +784,7 @@ class RecordingService : Service(), LifecycleOwner {
         }
     }
 
-    private fun startMetricsLoggingJob() {
-        metricsJob?.cancel()
-        metricsJob = serviceScope.launch {
-            while (_serviceState.value.isRecording) {
-                val currentState = _serviceState.value
-                val details = "Bytes:${currentState.recordedBytes}, File:${File(currentState.currentFile).name}"
-                metricsLogger?.captureMetrics(details)
-                delay(timeMillis = 15_000L)
-            }
-        }
-    }
-
     private fun stopRecordingPipeline() {
-        metricsJob?.cancel()
-        metricsJob = null
         stopSegmentRotationTimer()
 
         activeRecording?.stop()
@@ -864,7 +829,7 @@ class RecordingService : Service(), LifecycleOwner {
     }
 
     override fun onDestroy() {
-        pocketStorageDetector?.stopListening()
+        collisionDropDetector?.stopListening()
         collisionDropDetector?.stopListening()
         audioImpactDetector?.stopListening()
         analysisExecutor.shutdown()
