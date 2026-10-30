@@ -12,7 +12,7 @@ ChariSafe は、バックグラウンドでの安定稼働と省電力性を最�
 [ UI Layer ]
    ├── MainScreen (Compose: 常時表示 / 履歴 / ライド結果 / 設定 画面切替)
    └── MainViewModel (UI状態保持, センサー・サービス連携)
-       ↕
+       ↕ (Realtime StateFlows)
 [ Domain Layer ]
    ├── Models (AppConfig, SystemStatus, EventDetectionLog, IncidentLog, GpxPoint, RideSummary)
    └── Repositories I/F (ConfigRepository, EventLogRepository, GpxRepository, RecordingRepository)
@@ -40,12 +40,12 @@ ChariSafe は、バックグラウンドでの安定稼働と省電力性を最�
 
 | レイヤー / パッケージ | 主要クラス | 責務 | インターフェース (I/F) |
 |---|---|---|---|
-| **UI** (`ui.main`) | `MainScreen`<br>`MainViewModel` | 画面描画、ユーザー操作の受託、リアルタイム状態表示、画面状態 (`MainUiState`) の管理 | 各 Repository 経由でデータを操作 |
+| **UI** (`ui.main`) | `MainScreen`<br>`MainViewModel` | 画面描画、ユーザー操作の受託、リアルタイム状態表示、画面状態 (`MainUiState`) の管理 | 各 Repository 経由でデータを操作。各 Detector のリアルタイム StateFlow を直結 |
 | **Domain - Model** (`domain.model`) | `AppConfig`<br>`SystemStatus`<br>`EventDetectionLog`<br>`IncidentLog`<br>`GpxPoint`<br>`RideSummary` | アプリ全体で扱うデータ構造の定義 | 純粋なデータモデル |
 | **Domain - Repository I/F** (`domain.repository`) | `ConfigRepository`<br>`EventLogRepository`<br>`GpxRepository`<br>`RecordingRepository` | データアクセスおよびサービス操作のための抽象インターフェース群 | `data` レイヤーで具現化実装 |
-| **Data - Service** (`data.service`) | `RecordingService` | **バックグラウンド中核処理**。<br>CameraXによる動画録画、リングバッファ切替、各検知器のライフサイクル制御、イベント発生時のセグメント保護発火 | - Intent (`ACTION_START_RECORDING` / `ACTION_STOP_RECORDING`)<br>- Bind (`LocalBinder`)<br>- StateFlow (`ServiceState`) |
+| **Data - Service** (`data.service`) | `RecordingService` | **バックグラウンド中核処理**。<br>CameraXによる動画録画、リングバッファ切替、各検知器のライフサイクル制御、リアルタイム StateFlow の中継、イベント発生時のセグメント保護発火 | - Intent (`ACTION_START_RECORDING` / `ACTION_STOP_RECORDING`)<br>- Bind (`LocalBinder`)<br>- StateFlow (`ServiceState` & リアルタイム各数値) |
 | **Data - Service** (`data.service`) | `EventCoordinator` | イベント発生時のセグメント保護排他制御（ロック）と危険度（Severity）調停 | `RecordingService` 内でスレッドセーフに実行 |
-| **Data - Detectors** (`data.camera`, `data.sensor`, `data.location`) | `RearApproachDetector`<br>`SpeedDecelerationDetector`<br>`CollisionDropDetector`<br>`AudioImpactDetector` | カメラ画像解析、GPS速度変化、加速度、マイク音声による各種危険状態のリアルタイム検知 | 検知時に各種コールバックを発火 (`onApproachDetected`, `onDecelerationDetected` 等) |
+| **Data - Detectors** (`data.camera`, `data.sensor`, `data.location`) | `RearApproachDetector`<br>`SpeedDecelerationDetector`<br>`CollisionDropDetector`<br>`AudioImpactDetector` | カメラ画像解析、GPS速度変化、加速度、マイク音声によるリアルタイム危険検知。**常時リアルタイム評価値を StateFlow として公開** | 検知時にコールバック発火。<br>常時リアルタイム値を StateFlow でストリーミング発行 |
 | **Data - Location** (`data.location`) | `LocationTracker` | GPS/ネットワークによる位置情報・速度の取得と GPX ポイント化 | StateFlow `currentLocation` |
 | **Data - Local Storage** (`data.local`) | `RingBufferManager`<br>`EventDetectionLogStore`<br>`IncidentLogStore`<br>`RideSummaryStore` | 動画リングバッファ (`seg_*.mp4`) の削除・保護退避、イベント履歴・走行結果の JSON 永続化 | 同期/非同期 ファイル I/O |
 | **Data - Trace** (`data.debug`) | `TraceLogger` | システム全体の動作追跡および不具合分析のための統一トレーサビリティログ出力 | 統合ログ出力 |
@@ -66,16 +66,16 @@ flowchart TD
     end
 
     subgraph Service_Layer["Data レイヤー (バックグラウンド処理)"]
-        RS["RecordingService (録画・各種判定制御)"]
+        RS["RecordingService (録画・各種判定制御・StateFlow中継)"]
         EC["EventCoordinator (セグメント保護調停)"]
     end
 
     subgraph Detector_Layer["Data レイヤー (センサー・解析)"]
         LT["LocationTracker (GPS位置・速度)"]
-        SDD["SpeedDecelerationDetector (減速計算)"]
-        RAD["RearApproachDetector (カメラ解析)"]
-        CDD["CollisionDropDetector (衝撃検知)"]
-        AID["AudioImpactDetector (音量検知)"]
+        SDD["SpeedDecelerationDetector (減速計算 & StateFlow)"]
+        RAD["RearApproachDetector (カメラ解析 & StateFlow)"]
+        CDD["CollisionDropDetector (衝撃検知 & StateFlow)"]
+        AID["AudioImpactDetector (音量検知 & StateFlow)"]
     end
 
     subgraph Local_Layer["Data レイヤー (保存・動画バッファ)"]
@@ -87,7 +87,7 @@ flowchart TD
     MS <-->|UIState / 操作| VM
     VM <-->|呼び出し| RepoIF
     VM -->|Service起動/バインド| RS
-    RS -->|StateFlow通知| VM
+    RS -->|StateFlow (ServiceState & Realtime Flow)| VM
 
     RS -->|カメラフレーム| RAD
     RS -->|マイク音声| AID
@@ -95,10 +95,17 @@ flowchart TD
     LT -->|位置・速度データ| SDD
     LT -->|現在地| VM
 
-    SDD -->|減速イベント| RS
-    RAD -->|接近イベント| RS
-    CDD -->|衝撃イベント| RS
-    AID -->|音量イベント| RS
+    %% リアルタイム StateFlow 配信
+    RAD -->|approachScoreState| RS
+    SDD -->|decelerationState| RS
+    CDD -->|gForceState| RS
+    AID -->|soundAmplitudeState| RS
+
+    %% イベントトリガー コールバック
+    SDD -->|onDecelerationDetected| RS
+    RAD -->|onApproachDetected| RS
+    CDD -->|onCollisionOrDropDetected| RS
+    AID -->|onLoudSoundDetected| RS
 
     RS <-->|保護ロック排他制御| EC
     RS -->|動画切出・保持| RBM
@@ -112,10 +119,10 @@ flowchart TD
 | データ項目名 | 型 | 単位 | 更新頻度 | 管理モジュール | 責務と取り扱いルール |
 |---|---|---|---|---|---|
 | `currentSpeedKmh` | `Float` | km/h | 1秒〜数秒毎 | `LocationTracker`<br>→ `MainViewModel` | 現在速度。GPS測位誤差による異常値（外れ値）はフィルタリングして伝搬すること。 |
-| `deceleration` | `Float` | m/s² | GPS更新毎 | `SpeedDecelerationDetector` | 速度変化から算出される減速度。表示単位は「m/s²」で厳格に統一すること。 |
-| `approachScore` | `Float` | スコア | 10fps (カメラ) | `RearApproachDetector` | カメラ解析による接近危険度スコア。 |
-| `gForce` | `Float` | G | 約20ms毎 | `CollisionDropDetector` | 3軸合成加速度。衝撃閾値判定に使用。 |
-| `maxAmplitude` | `Int` | 振幅 | PCM読込毎 | `AudioImpactDetector` | マイク音圧振幅値。音量衝撃閾値判定に使用。 |
+| `deceleration` | `Float` | m/s² | GPS更新毎 | `SpeedDecelerationDetector` | 速度変化から算出されるリアルタイム減速度 (`decelerationState`)。表示単位は「m/s²」で厳格に統一すること。 |
+| `approachScore` | `Float` | スコア | 10fps (カメラ) | `RearApproachDetector` | カメラ解析によるリアルタイム接近危険度スコア (`approachScoreState`)。 |
+| `gForce` | `Float` | G | 約20ms毎 | `CollisionDropDetector` | 3軸合成加速度 (`gForceState`)。衝撃リアルタイム表示および閾値判定に使用。 |
+| `maxAmplitude` | `Int` | 振幅 | PCM読込毎 | `AudioImpactDetector` | マイク音圧振幅リアルタイム値 (`soundAmplitudeState`)。音量リアルタイム表示および閾値判定に使用。 |
 | `activeCamera` | `Enum` | - | 設定変更時 | `AppConfig` | 使用カメラ (`REAR` / `FRONT`)。設定値に従ってカメラバインドを切り替えること。 |
 | `EventDetectionLog` | `Class` | - | イベント成立時 | `EventLogRepositoryImpl` | 発生した検知イベントログ。連打・重複発生を防止するクールダウン制御を設けること。 |
 | `IncidentLog` | `Class` | - | イベント確定時 | `EventLogRepositoryImpl` | 動画と紐付いたインシデント保護ログ。 |
@@ -123,7 +130,20 @@ flowchart TD
 
 ---
 
-## 5. モジュール間 I/F 一覧
+## 5. 「リアルタイム表示」と「イベント判定」のデータ分離仕様
+
+「常時表示（リアルタイムフィードバック）」と「イベント判定（トリガー記録）」の混同を防ぐためのデータ分離設計仕様である。
+
+| 機能種別 | ① リアルタイム StateFlow 値 (生データ) | ② イベント発火閾値 (トリガー条件) | ③ UI 表示値 (`MainUiState`) | ④ イベントログ保存値 (`EventDetectionLog`) |
+|---|---|---|---|---|
+| **接近 (`APPROACH`)** | `approachScoreState`<br>- カメラフレーム毎の接近スコア<br>- 範囲: `0.0 〜 100.0` | **動的スコア閾値**: `25.0 + (感度 * 45.0)`<br>(範囲: 38.5 〜 70.0)<br>＆ 連続4フレーム以上成立 | `currentApproachScore`<br>- 常時画面の接近バー<br>- リアルタイムスコア (`0〜100`) | - `sensitivityValue`: 設定感度生値 (例: `0.7`)<br>- `sensitivityLabel`: `"感度: 70%"` |
+| **減速 (`DECELERATION`)** | `decelerationState`<br>- 現在のリアルタイム減速度<br>- 単位: `m/s²` (0.0〜5.0) | **減速閾値**: `1.0 〜 4.0 m/s²`<br>＆ 連続2回以上超過 | `currentDecelValue`<br>- 常時画面の減速バー<br>- リアルタイム減速度 (`m/s²`) | - `sensitivityValue`: 減速閾値 (例: `1.5`)<br>- `sensitivityLabel`: `"1.5m/s²"` |
+| **衝撃 (`COLLISION`)** | `gForceState`<br>- 3軸合成重力加速度<br>- 単位: `G` (1.0G〜10.0G+) | **衝撃閾値**: `>= 3.0 G`<br>(合成加速度 29.43 m/s² 以上) | `currentGValue`<br>- 常時画面の衝撃バー<br>- リアルタイム合成加速度 (`G`) | - `sensitivityValue`: 衝撃閾値 (例: `3.0`)<br>- `sensitivityLabel`: `"3.0G"` |
+| **音量 (`SOUND`)** | `soundAmplitudeState`<br>- マイク音圧の振幅最大値<br>- 範囲: `0 〜 32767` | **振幅閾値**: `1000 〜 32767`<br>(デフォルト: 5000) | `currentSoundAmplitude`<br>- 常時画面の音量バー<br>- リアルタイム振幅値 (`0〜32767`) | - `sensitivityValue`: 振幅閾値 (例: `5000.0`)<br>- `sensitivityLabel`: `"振幅: 5000"` |
+
+---
+
+## 6. モジュール間 I/F 一覧
 
 | モジュール名 | 公開 I/F | 入力パラメータ | 出力 / 戻り値 | 呼び出し元 | 呼び出し先 |
 |---|---|---|---|---|---|
@@ -132,14 +152,14 @@ flowchart TD
 | **`EventLogRepository`** | `addDetectionLog()` / `addOrUpdateIncidentLog()` | `EventDetectionLog` / `IncidentLog` | `Unit` | `RecordingService`, `MainViewModel` | `EventDetectionLogStore`, `IncidentLogStore` |
 | **`GpxRepository`** | `startLogging()` / `stopLogging()` | `intervalSeconds: Long` | `Unit` | `MainViewModel` | `LocationTracker`, `GpxFileWriter` |
 | **`RecordingRepository`** | `startRecording()` / `stopRecording()` | `AppConfig` | `Unit` | `MainViewModel` | `RecordingService` (Foreground Service 起動/停止) |
-| **`RearApproachDetector`** | `analyze()` | `ImageProxy` (CameraX YUVフレーム) | `Unit` (内部で検知時コールバック) | CameraX `ImageAnalysis` | コールバック `onApproachDetected` |
-| **`SpeedDecelerationDetector`** | `feedPoint()` | `GpxPoint` | `Unit` (内部で検知時コールバック) | `LocationTracker`, `MainViewModel` | コールバック `onDecelerationDetected` |
-| **`CollisionDropDetector`** | `startListening()` / `stopListening()` | 加速度センサーイベント | `Unit` (内部で検知時コールバック) | `RecordingService` | コールバック `onCollisionOrDropDetected` |
-| **`AudioImpactDetector`** | `startListening()` / `stopListening()` | マイク PCM 音声ストリーム | `Unit` (内部で検知時コールバック) | `RecordingService` | コールバック `onLoudSoundDetected` |
+| **`RearApproachDetector`** | `analyze()` / `approachScoreState` | `ImageProxy` (CameraX YUVフレーム) | `StateFlow<Float>` (リアルタイムスコア) | CameraX `ImageAnalysis` | コールバック `onApproachDetected` & StateFlow |
+| **`SpeedDecelerationDetector`** | `feedPoint()` / `decelerationState` | `GpxPoint` | `StateFlow<Float>` (リアルタイム減速度 m/s²) | `LocationTracker`, `MainViewModel` | コールバック `onDecelerationDetected` & StateFlow |
+| **`CollisionDropDetector`** | `startListening()` / `gForceState` | 加速度センサーイベント | `StateFlow<Float>` (リアルタイム G値) | `RecordingService` | コールバック `onCollisionOrDropDetected` & StateFlow |
+| **`AudioImpactDetector`** | `startListening()` / `soundAmplitudeState` | マイク PCM 音声ストリーム | `StateFlow<Float>` (リアルタイム振幅) | `RecordingService` | コールバック `onLoudSoundDetected` & StateFlow |
 
 ---
 
-## 6. Domain Model 一覧
+## 7. Domain Model 一覧
 
 | モデル名 | 作成者 (インスタンス生成) | 更新者 | 保存先 | 利用者 (参照元) |
 |---|---|---|---|---|
@@ -152,7 +172,7 @@ flowchart TD
 
 ---
 
-## 7. Flow 一覧 (状態伝搬)
+## 8. Flow 一覧 (状態伝搬)
 
 | Flow 名 | 型 | 発行・更新元 (Mutable) | 購読・参照元 (StateFlow) | 用途・保持データ |
 |---|---|---|---|---|
@@ -162,13 +182,15 @@ flowchart TD
 | **`lastDetectionLog`** | `StateFlow<EventDetectionLog?>` | `EventLogRepositoryImpl` (`_lastDetectionLog`) | `MainViewModel` | 直近で発生した最新のイベント検知ログ |
 | **`currentGpxPoint`** | `StateFlow<GpxPoint?>` | `LocationTracker` (`_currentLocation`) | `GpxRepositoryImpl`, `MainViewModel` | 最新の GPS 位置および速度情報 |
 | **`recordingState`** | `StateFlow<RecordingState>` | `RecordingRepositoryImpl` (`_recordingState`) | `MainViewModel` | 録画サービスの状態 (IDLE, RECORDING, EXPORTING) |
-| **`uiState`** | `StateFlow<MainUiState>` | `MainViewModel` (内部StateFlow群の `combine`) | `MainScreen` (Compose UI) | 画面描画用統合 UI ステート |
-
-*※注: 現行アーキテクチャでは `SharedFlow` および `LiveData` は使用せず、すべて `StateFlow` に統一されている。*
+| **`approachScoreState`** | `StateFlow<Float>` | `RearApproachDetector` | `MainViewModel` | リアルタイム接近危険度スコア |
+| **`decelerationState`** | `StateFlow<Float>` | `SpeedDecelerationDetector` | `MainViewModel` | リアルタイム減速度 (`m/s²`) |
+| **`gForceState`** | `StateFlow<Float>` | `CollisionDropDetector` | `MainViewModel` | リアルタイム合成加速度 (`G`) |
+| **`soundAmplitudeState`** | `StateFlow<Float>` | `AudioImpactDetector` | `MainViewModel` | リアルタイムマイク音圧振幅 (`0〜32767`) |
+| **`uiState`** | `StateFlow<MainUiState>` | `MainViewModel` (内部StateFlow群の `combine`) | `MainScreen` (Compose UI) | 画面描画用統合 UI ステート (リアルタイム値を直接結合) |
 
 ---
 
-## 8. コールバック一覧 (イベント通知)
+## 9. コールバック一覧 (イベント通知)
 
 | コールバック名 | 発火元 (Notifier) | 受信先 (Listener) | 引数 (パラメータ) | 発生タイミング・用途 |
 |---|---|---|---|---|
@@ -180,7 +202,7 @@ flowchart TD
 
 ---
 
-## 9. Repository 実装一覧
+## 10. Repository 実装一覧
 
 | Interface | 実装クラス (Implementation) | 主な利用箇所 (Clients) |
 |---|---|---|
@@ -191,7 +213,7 @@ flowchart TD
 
 ---
 
-## 10. Store / ストレージ仕様一覧
+## 11. Store / ストレージ仕様一覧
 
 | Store 名 / クラス | 保存対象データ | 保存先 (パス / ファイル名) | 更新元 (Write) | 読み出し元 (Read) |
 |---|---|---|---|---|
@@ -202,10 +224,10 @@ flowchart TD
 
 ---
 
-## 11. 画面状態およびサービス内部状態構造定義
+## 12. 画面状態およびサービス内部状態構造定義
 
-### 11.1 `MainUiState` 構造定義
-画面 (`MainScreen`) の表示に使用される全プロパティ構造である。
+### 12.1 `MainUiState` 構造定義
+画面 (`MainScreen`) の表示に使用される全プロパティ構造である。（各リアルタイム値はフォールバック計算ではなく Detector の StateFlow に直結される）
 
 | プロパティ名 | 型 | 初期値 | 用途・説明 |
 |---|---|---|---|
@@ -226,12 +248,12 @@ flowchart TD
 | `sensitivity` | `EventSensitivity` | `EventSensitivity()` | イベント判定感度設定 |
 | `currentRideSummary` | `RideSummary?` | `null` | 最新の走行結果サマリー |
 | `userMessage` | `String?` | `null` | 一時表示メッセージ |
-| `currentApproachScore` | `Float` | `0f` | リアカメラのリアルタイム接近スコア (0〜100) |
-| `currentDecelValue` | `Float` | `0f` | リアルタイム減速度 (m/s²) |
-| `currentGValue` | `Float` | `0f` | リアルタイム合成加速度 (G) |
-| `currentSoundAmplitude` | `Float` | `0f` | リアルタイム音圧振幅値 |
+| `currentApproachScore` | `Float` | `0f` | リアカメラのリアルタイム接近スコア (0〜100, `approachScoreState` 直結) |
+| `currentDecelValue` | `Float` | `0f` | リアルタイム減速度 (`decelerationState` 直結, `m/s²`) |
+| `currentGValue` | `Float` | `0f` | リアルタイム合成加速度 (`gForceState` 直結, `G`) |
+| `currentSoundAmplitude` | `Float` | `0f` | リアルタイム音圧振幅値 (`soundAmplitudeState` 直結) |
 
-### 11.2 `ServiceState` 構造定義
+### 12.2 `ServiceState` 構造定義
 バックグラウンドサービス (`RecordingService`) の動作状態構造である。
 
 | プロパティ名 | 型 | 初期値 | 用途・説明 |
@@ -245,9 +267,9 @@ flowchart TD
 
 ---
 
-## 12. 主要ログモデル構造定義
+## 13. 主要ログモデル構造定義
 
-### 12.1 `EventDetectionLog` 項目定義
+### 13.1 `EventDetectionLog` 項目定義
 
 | フィールド名 | 型 | 生成時初期値 | 単位 / 形式 | 役割・説明 |
 |---|---|---|---|---|
@@ -263,7 +285,7 @@ flowchart TD
 | `incidentId` | `String?` | `null` | ID | 紐付けられた IncidentLog ID |
 | `segmentName` | `String` | `""` | ファイル名 | 発生時に録画中だったセグメント動画ファイル名 |
 
-### 12.2 `IncidentLog` 項目定義
+### 13.2 `IncidentLog` 項目定義
 
 | フィールド名 | 型 | 生成時初期値 | 単位 / 形式 | 役割・説明 |
 |---|---|---|---|---|
@@ -282,20 +304,20 @@ flowchart TD
 
 ---
 
-## 13. `RecordingService` 内部責務定義
+## 14. `RecordingService` 内部責務定義
 
 | 内部責務区分 | 具体的内容・処理方針 | 関連処理 / 関連メソッド |
 |---|---|---|
 | **ライフサイクル & 前景登録** | Foreground Service（`FOREGROUND_SERVICE_TYPE_CAMERA`）の起動・停止、通知表示、スリープ防止 WakeLock の維持管理。 | `onStartCommand`, `startForegroundWithNotification`, `acquireWakeLock`, `releaseWakeLock` |
 | **CameraX 録画パイプライン** | バックグラウンドでの CameraX セッション構築、目標FPS（10fps）の指定、ImageAnalysis（後方接近検知）との同期実行、動画出力。 | `startRecordingPipeline`, `setupVideoCaptureAndStart`, `startVideoFileOutput`, `stopRecordingPipeline` |
 | **セグメント自動ローテーション** | Coroutine タイマーにより 1 分ごとに循環動画セグメント (`seg_*.mp4`) の切り替え・作成を実行。 | `startSegmentRotationTimer`, `stopSegmentRotationTimer` |
-| **センサー検知器統括** | 加速度、マイク、カメラの各 Detector の登録・監視・停止を集中制御。 | `collisionDropDetector`, `audioImpactDetector` の起動/停止 |
+| **センサー検知器統括** | 加速度、マイク、カメラの各 Detector の登録・監視・停止およびリアルタイム StateFlow の中継制御。 | `collisionDropDetector`, `audioImpactDetector` の起動/停止 |
 | **イベント検出 & 保護排他制御** | 各 Detector からのイベント通知を受信。`EventCoordinator` を使用した保護排他ロックおよび動画セグメント退避コピーの実行。 | `handleDetectedEvent`, `EventCoordinator.executeWithProtection` |
 | **通知・警告音制御** | イベント発生時のビープ警告音発報、および保護完了時の OS 通知発行。 | `toneGenerator`, `showRecordingCompletionNotification` |
 
 ---
 
-## 14. 主要データの Life-Cycle マトリクス (生成・更新・参照)
+## 15. 主要データの Life-Cycle マトリクス (生成・更新・参照)
 
 | データ構造 | 生成元 (Create) | 更新元 (Update) | 参照元 (Read) |
 |---|---|---|---|
@@ -310,7 +332,7 @@ flowchart TD
 
 ---
 
-## 15. `MainViewModel` 内部責務定義
+## 16. `MainViewModel` 内部責務定義
 
 | 内部責務区分 | 具体的内容 | 関連メソッド / プロパティ |
 |---|---|---|
@@ -319,11 +341,11 @@ flowchart TD
 | **録画セッション制御** | 録画開始・停止指示、GPSログ取得停止、`RideSummary`（走行結果サマリー）の自動計算。 | `startRecording()`, `stopRecording()`, `calculateHaversineDistance()` |
 | **走行データ・永続化管理** | イベントログ・インシデントログ・過去サマリーの読み込み・削除処理。 | `loadExistingEvents()`, `loadRideSummaries()`, `deleteRideSummary()`, `deleteCurrentRide()` |
 | **データ出力 & 共有処理** | イベント動画・ログ・GPXファイルのZip圧縮出力およびOS共有インテントの発行。 | `createAndShareZip()`, `shareAllData()`, `shareLogsOnly()`, `shareVideosOnly()` |
-| **`MainUiState` 合成処理** | リポジトリ層・位置情報・サービス状態を `combine` で合成し単一の `uiState` に集約。 | `uiState` (StateFlow combine 定義) |
+| **`MainUiState` 合成処理** | リポジトリ層・位置情報・サービス状態・**Detector リアルタイム StateFlow** を `combine` で合成し単一の `uiState` に集約。 | `uiState` (StateFlow combine 定義) |
 
 ---
 
-## 16. `EventCoordinator` 内部責務定義
+## 17. `EventCoordinator` 内部責務定義
 
 | 内部責務区分 | 具体的内容 | 関連メソッド / フィールド |
 |---|---|---|
@@ -333,7 +355,7 @@ flowchart TD
 
 ---
 
-## 17. Repository 公開 API 仕様一覧
+## 18. Repository 公開 API 仕様一覧
 
 | インターフェース | メソッド名 | 引数 (Inputs) | 戻り値 (Outputs) | 主な役割 |
 |---|---|---|---|---|
@@ -352,9 +374,9 @@ flowchart TD
 
 ---
 
-## 18. 永続化 JSON スキーマ定義
+## 19. 永続化 JSON スキーマ定義
 
-### 18.1 イベント検知ログ (`logs/event_detection_logs.json`)
+### 19.1 イベント検知ログ (`logs/event_detection_logs.json`)
 ```json
 [
   {
@@ -372,7 +394,7 @@ flowchart TD
 ]
 ```
 
-### 18.2 インシデント保護ログ (`logs/incident_logs.json`)
+### 19.2 インシデント保護ログ (`logs/incident_logs.json`)
 ```json
 [
   {
@@ -391,7 +413,7 @@ flowchart TD
 ]
 ```
 
-### 18.3 走行結果サマリー (`logs/ride_summaries.json`)
+### 19.3 走行結果サマリー (`logs/ride_summaries.json`)
 ```json
 [
   {
@@ -422,18 +444,18 @@ flowchart TD
 
 ---
 
-## 19. Detector アルゴリズム・入出力・内部パラメータ一覧
+## 20. Detector アルゴリズム・入出力・内部パラメータ一覧
 
-| Detector クラス | 入力データ (Input) | 内部アルゴリズム / 判定条件 | 閾値・内部パラメータ | 出力 / コールバック |
+| Detector クラス | 入力データ (Input) | 内部アルゴリズム / 判定条件 | 閾値・内部パラメータ | 出力 / コールバック & StateFlow |
 |---|---|---|---|---|
-| **`RearApproachDetector`** | CameraX `ImageProxy`<br>(YUV_420_888) | 中央 ROI (X:30%-70%, Y:40%-80%) 内の高輝度ピクセル比率 & 拡大率から接近スコアを計算。夜間輝度フィルタ適用。 | - 高輝度ピクセル閾値: `>= 200`<br>- 夜間輝度上限: `<= 240.0`<br>- 連続判定数: `>= 4 フレーム`<br>- 動的スコア閾値: `25.0 + (感度 * 45.0)` | `onApproachDetected` |
-| **`SpeedDecelerationDetector`** | `GpxPoint`<br>(速度 km/h, 時間 ms) | 速度を m/s に換算後、EMA平滑化 (α=0.35)。時間差分から減速度 `(v_prev - v_curr) / dt` [m/s²] を計算。 | - 平滑化係数: `0.35`<br>- 減速閾値: `1.0 〜 4.0 m/s²`<br>- 連続超過数: `>= 2 回` | `onDecelerationDetected` |
-| **`CollisionDropDetector`** | 加速度 `SensorEvent`<br>(TYPE_ACCELEROMETER) | 3軸合成加速度 `sqrt(x²+y²+z²)` を計算し重力加速度 (9.81 m/s²) で割って G換算。 | - 衝撃判定閾値: `>= 3.0 G`<br>- 重力加速度: `9.81 m/s²` | `onCollisionOrDropDetected` |
-| **`AudioImpactDetector`** | マイク PCM 16bit 音声<br>(`AudioRecord`, 8kHz) | ShortArrayバッファの振幅絶対値の最大値 `maxAmplitude` を検出。接近警告音鳴動中はミュート。 | - サンプリングレート: `8000 Hz`<br>- 設定振幅閾値: `1000 〜 32767`<br>- 一時ミュートフラグ: `isMuted` | `onLoudSoundDetected` |
+| **`RearApproachDetector`** | CameraX `ImageProxy`<br>(YUV_420_888) | 中央 ROI (X:30%-70%, Y:40%-80%) 内の高輝度ピクセル比率 & 拡大率から接近スコアを計算。夜間輝度フィルタ適用。 | - 高輝度ピクセル閾値: `>= 200`<br>- 夜間輝度上限: `<= 240.0`<br>- 連続判定数: `>= 4 フレーム`<br>- 動的スコア閾値: `25.0 + (感度 * 45.0)` | - `onApproachDetected`<br>- `approachScoreState: StateFlow<Float>` |
+| **`SpeedDecelerationDetector`** | `GpxPoint`<br>(速度 km/h, 時間 ms) | 速度を m/s に換算後、EMA平滑化 (α=0.35)。時間差分から減速度 `(v_prev - v_curr) / dt` [m/s²] を計算。 | - 平滑化係数: `0.35`<br>- 減速閾値: `1.0 〜 4.0 m/s²`<br>- 連続超過数: `>= 2 回` | - `onDecelerationDetected`<br>- `decelerationState: StateFlow<Float>` |
+| **`CollisionDropDetector`** | 加速度 `SensorEvent`<br>(TYPE_ACCELEROMETER) | 3軸合成加速度 `sqrt(x²+y²+z²)` を計算し重力加速度 (9.81 m/s²) で割って G換算。 | - 衝撃判定閾値: `>= 3.0 G`<br>- 重力加速度: `9.81 m/s²` | - `onCollisionOrDropDetected`<br>- `gForceState: StateFlow<Float>` |
+| **`AudioImpactDetector`** | マイク PCM 16bit 音声<br>(`AudioRecord`, 8kHz) | ShortArrayバッファの振幅絶対値の最大値 `maxAmplitude` を検出。接近警告音鳴動中はミュート。 | - サンプリングレート: `8000 Hz`<br>- 設定振幅閾値: `1000 〜 32767`<br>- 一時ミュートフラグ: `isMuted` | - `onLoudSoundDetected`<br>- `soundAmplitudeState: StateFlow<Float>` |
 
 ---
 
-## 20. システム全体のデータ単位変換仕様一覧
+## 21. システム全体のデータ単位変換仕様一覧
 
 第三者がアルゴリズムや表示ロジックを正確に再構築するための変換規則である。
 
