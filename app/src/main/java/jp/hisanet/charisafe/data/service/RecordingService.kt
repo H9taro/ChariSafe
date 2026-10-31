@@ -657,7 +657,8 @@ class RecordingService : Service(), LifecycleOwner {
                     highestSeverityType = eventType,
                     latitude = lat,
                     longitude = lon,
-                    coveredSegmentFiles = coveredFiles,
+                    videoFilePath = "",
+                    coveredSegmentFiles = emptyList(),
                     status = IncidentStatus.PENDING
                 )
 
@@ -823,13 +824,47 @@ class RecordingService : Service(), LifecycleOwner {
                                     if (finalizedFile.exists()) {
                                         inc.timestampMs = finalizedFile.lastModified()
                                     }
+
+                                    val recordingsDir = FileUtils.getRecordingsDir(this@RecordingService)
+                                    val destFile = File(recordingsDir, finalizedFile.name)
+                                    val updatedPaths = inc.coveredSegmentFiles.map { oldPath ->
+                                        val oldFile = File(oldPath)
+                                        if (oldFile.name == finalizedFile.name) destFile.absolutePath else oldPath
+                                    }.toMutableList()
+                                    if (!updatedPaths.contains(destFile.absolutePath)) {
+                                        updatedPaths.add(destFile.absolutePath)
+                                    }
+                                    inc.coveredSegmentFiles = updatedPaths
+                                    if (inc.videoFilePath.isEmpty() || !File(inc.videoFilePath).exists()) {
+                                        inc.videoFilePath = destFile.absolutePath
+                                    }
+
                                     IncidentLogStore.saveIncidents(this@RecordingService, incidents)
                                     Log.i(TAG, "✨ PENDING → SUCCESS 状態遷移完了(現行セグメント完了時): ${inc.id}")
-                                    // 現行セグメント完了時の遅延通知発報
                                     showRecordingCompletionNotification(inc)
                                     iterator.remove()
                                 }
                             }
+                        }
+
+                        // フェイルセーフ: パスが空のインシデントがあれば、今回のファイナライズファイルで強制補完
+                        val freshIncidents = IncidentLogStore.loadIncidents(this@RecordingService).toMutableList()
+                        val pendingIncidents = freshIncidents.filter { it.status == IncidentStatus.PENDING && (it.videoFilePath.isEmpty() || it.coveredSegmentFiles.isEmpty()) }
+                        if (pendingIncidents.isNotEmpty() && finalizedFile.exists() && finalizedFile.length() > 0) {
+                            val recordingsDir = FileUtils.getRecordingsDir(this@RecordingService)
+                            val destFile = File(recordingsDir, finalizedFile.name)
+                            if (!destFile.exists()) {
+                                finalizedFile.copyTo(destFile, overwrite = true)
+                                MediaScannerConnection.scanFile(this@RecordingService, arrayOf(destFile.absolutePath), null, null)
+                            }
+
+                            pendingIncidents.forEach { inc ->
+                                if (inc.videoFilePath.isEmpty()) inc.videoFilePath = destFile.absolutePath
+                                if (inc.coveredSegmentFiles.isEmpty()) inc.coveredSegmentFiles = mutableListOf(destFile.absolutePath)
+                                inc.status = IncidentStatus.SUCCESS
+                                Log.i(TAG, "🛡️ フェイルセーフ救済: パス空のインシデント ${inc.id} に ${destFile.absolutePath} を強制紐付けました")
+                            }
+                            IncidentLogStore.saveIncidents(this@RecordingService, freshIncidents)
                         }
                     }
 

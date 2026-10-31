@@ -538,8 +538,8 @@ fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState:
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        val targetFile = resolveTargetFile(context, inc)
-                                        if (targetFile != null) {
+                                        val targetFile = resolveTargetFile(inc)
+                                        if (targetFile != null && targetFile.exists() && targetFile.length() > 0) {
                                             try {
                                                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", targetFile)
                                                 val intent = Intent(Intent.ACTION_VIEW).apply {
@@ -549,7 +549,10 @@ fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState:
                                                 context.startActivity(intent)
                                             } catch (e: Exception) {
                                                 android.util.Log.e("HistoryContent", "Failed to play video", e)
+                                                android.widget.Toast.makeText(context, "動画の再生に失敗しました: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
                                             }
+                                        } else {
+                                            android.widget.Toast.makeText(context, "指定された動画ファイルが見つかりません（削除または移動済みの可能性があります）", android.widget.Toast.LENGTH_LONG).show()
                                         }
                                     },
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -849,7 +852,7 @@ fun SettingsContent(
     }
 }
 
-private fun resolveTargetFile(context: android.content.Context, inc: IncidentLog): File? {
+private fun resolveTargetFile(inc: IncidentLog): File? {
     if (inc.coveredSegmentFiles.isNotEmpty()) {
         for (path in inc.coveredSegmentFiles) {
             val f = File(path)
@@ -860,9 +863,5 @@ private fun resolveTargetFile(context: android.content.Context, inc: IncidentLog
         val f = File(inc.videoFilePath)
         if (f.exists() && f.length() > 0) return f
     }
-    val recDir = jp.hisanet.charisafe.util.FileUtils.getRecordingsDir(context)
-    val found = recDir.listFiles { _, name -> name.endsWith(".mp4") }
-        ?.sortedByDescending { it.lastModified() }
-        ?.firstOrNull()
-    return found
+    return null
 }

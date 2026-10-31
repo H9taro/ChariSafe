@@ -468,3 +468,24 @@ flowchart TD
 | PCM 短整数 (`short`) | 振幅絶対値 (`Int`) | `amplitude = abs(pcm_short_value)` | `AudioImpactDetector` |
 | ミリ秒 (`ms`) | 秒 (`sec`) | `dt_sec = (time_curr_ms - time_prev_ms) / 1000f` | `SpeedDecelerationDetector` |
 | 2点の緯度経度 (`degree`) | 距離 (`km`) | Haversine Formula (球面三角法公式) | `MainViewModel` (`calculateHaversineDistance`) |
+
+---
+
+## 22. 出力ファイル一覧 (Name / Purpose / Lifecycle / Data Items)
+
+ChariSafe アプリが内部ストレージ (`files/debug`, `files/logs`, `files/gpx`, `files/recordings`) に出力するすべての出力ファイルの仕様である。
+
+| ファイル名 (パターン) | 用途 (Purpose) | ライフサイクル (Lifecycle) | 主要データ項目 (Data Items) |
+|---|---|---|---|
+| **`files/debug/trace_yyyyMMdd.log`** | 全レイヤー間の数値・状態伝搬のトレースログ (v2) | 日付単位で生成。7日以上経過分は `DebugLogCleanupManager` により自動削除。 | `Timestamp`, `SessionId`, `SequenceNo`, `Metric`, `Layer`, `Value`, `Extra` |
+| **`files/debug/ui_state_debug_yyyyMMdd.csv`** | 画面 UI 状態 (`MainUiState`) の全表示値推移ログ | 日付単位で生成。自動クリーンアップ対象。 | `Timestamp`, `ApproachScore`, `DecelValue`, `GValue`, `SoundAmplitude`, `SpeedKmh` |
+| **`files/debug/approach_debug_yyyyMMdd.csv`** | リアアプローチ検知の生データ・スコア推移ログ | 日付単位で生成。自動クリーンアップ対象。 | `Timestamp`, `MaxBrightness`, `CurrentRatio`, `SmoothedRatio`, `ExpansionRate`, `ApproachScore`, `Threshold`, `Triggered` |
+| **`files/debug/audio_debug_yyyyMMdd.csv`** | カメラX AudioStats / 音量振幅の推移ログ | 日付単位で生成。自動クリーンアップ対象。 | `Timestamp`, `MaxAmplitude`, `Threshold`, `Sensitivity`, `Triggered` |
+| **`files/debug/collision_debug_yyyyMMdd.csv`** | 加速度センサの G 力推移ログ | 日付単位で生成。自動クリーンアップ対象。 | `Timestamp`, `GForce`, `ThresholdG`, `Triggered` |
+| **`files/debug/deceleration_debug_yyyyMMdd.csv`** | GPS 速度変化に基づく減速度推移ログ | 日付単位で生成。自動クリーンアップ対象。 | `Timestamp`, `SpeedKmh`, `Deceleration`, `Threshold`, `Triggered` |
+| **`files/debug/segment_protection_trace_yyyyMMdd.csv`** | リングバッファセグメント保護のライフサイクル追跡ログ | 日付単位で生成。自動クリーンアップ対象。 | `Timestamp`, `SegmentName`, `IsProtected`, `PendingProtection`, `TriggerEventType`, `ProtectionReason`, `Success` |
+| **`files/logs/incident_logs.json`** | 保護確定および審議中のインシデントログの永続化 | アプリ起動・イベント発生時に随時更新。 | `Id`, `TimestampMs`, `TriggerEventType`, `TriggerDetectionLogId`, `RelatedDetectionIds`, `HighestSeverityType`, `Latitude`, `Longitude`, `VideoFilePath`, `CoveredSegmentFiles`, `Status`, `FailureReason` |
+| **`files/logs/event_detection_logs.json`** | 各 Detector が検知した瞬間イベントログの永続化 | アプリ起動・検知時に随時更新。 | `Id`, `TimestampMs`, `EventType`, `SpeedKmh`, `Latitude`, `Longitude`, `SensitivityValue`, `SensitivityLabel`, `IncidentId` |
+| **`files/logs/ride_summaries.json`** | ライド（走行セッション）ごとの集計値の永続化 | ライド終了時に生成・保存。 | `StartTimeMs`, `EndTimeMs`, `MovingTimeSec`, `StoppedTimeSec`, `TotalDistanceKm`, `AverageSpeedKmh`, `MaxSpeedKmh`, `EventCounts` |
+| **`files/gpx/ride_yyyyMMdd_HHmmss.gpx`** | 走行軌跡の標準 GPX 形式出力 | 録画開始〜終了まで生成。 | `Latitude`, `Longitude`, `Speed`, `Timestamp` (GPXトラックポイント) |
+| **`files/recordings/seg_yyyyMMdd_HHmmss.mp4`** | ドライブレコーダーの映像データ（リングバッファ/保護） | 1分ごとのローテーション、保護時は recordings/ へ永続コピー。 | H.264 Video + AAC Audio Stream |
