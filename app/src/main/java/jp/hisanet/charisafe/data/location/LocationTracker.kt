@@ -75,20 +75,14 @@ class LocationTracker(context: Context) {
             val minDistanceMeters = 0f
 
             val lastKnownGps = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-            val lastKnownNet = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-            val bestLastKnown = when {
-                lastKnownGps != null && lastKnownNet != null -> if (lastKnownGps.time > lastKnownNet.time) lastKnownGps else lastKnownNet
-                else -> lastKnownGps ?: lastKnownNet
-            }
-
-            if (bestLastKnown != null) {
-                lastValidLatitude = bestLastKnown.latitude
-                lastValidLongitude = bestLastKnown.longitude
-                if (bestLastKnown.hasSpeed()) {
-                    lastValidSpeedKmh = bestLastKnown.speed * 3.6f
+            if (lastKnownGps != null) {
+                lastValidLatitude = lastKnownGps.latitude
+                lastValidLongitude = lastKnownGps.longitude
+                if (lastKnownGps.hasSpeed()) {
+                    lastValidSpeedKmh = lastKnownGps.speed * 3.6f
                 }
-                lastLocationTimestampMs = bestLastKnown.time
-                previousLocation = bestLastKnown
+                lastLocationTimestampMs = lastKnownGps.time
+                previousLocation = lastKnownGps
                 Log.i(TAG, "Initialized lastValidLocation from system provider: lat=$lastValidLatitude, lon=$lastValidLongitude")
             }
 
@@ -103,17 +97,6 @@ class LocationTracker(context: Context) {
                 providerRegistered = true
                 Log.i(TAG, "Started GPS_PROVIDER tracking")
             }
-            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                locationManager.requestLocationUpdates(
-                    LocationManager.NETWORK_PROVIDER,
-                    minTimeMs,
-                    minDistanceMeters,
-                    locationListener
-                )
-                providerRegistered = true
-                Log.i(TAG, "Started NETWORK_PROVIDER tracking")
-            }
-
             if (providerRegistered) {
                 isTracking = true
             } else {
