@@ -455,7 +455,7 @@ class RecordingService : Service(), LifecycleOwner {
             EventType.DECELERATION -> "減速: ${sens}秒"
             EventType.APPROACH -> "感度: ${(sens * 100).toInt()}%"
             EventType.COLLISION -> "G: ${sens}G"
-            EventType.SOUND -> "振幅: ${sens.toInt()}"
+            EventType.SOUND -> "振幅: ${((sens / 2.0f) * 100).toInt()}%"
         }
         handleDetectedEvent(eventType, sens, label)
     }
@@ -472,7 +472,7 @@ class RecordingService : Service(), LifecycleOwner {
             decelerationSensitivity = prefs.getFloat("key_decel_sensitivity", 1.5f),
             approachSensitivity = prefs.getFloat("key_approach_sensitivity", 0.7f),
             collisionSensitivity = prefs.getFloat("key_collision_sensitivity", 3.0f),
-            soundSensitivity = prefs.getFloat("key_sound_sensitivity", 0.4f)
+            soundSensitivity = prefs.getFloat("key_sound_sensitivity", 0.7f)
         )
 
         val detectionLog = EventDetectionLog(
@@ -539,7 +539,7 @@ class RecordingService : Service(), LifecycleOwner {
                         MediaScannerConnection.scanFile(this@RecordingService, arrayOf(destFile.absolutePath), null, null)
                         coveredFiles.add(destFile.absolutePath)
 
-                        traceLogger?.logProtectionTrace(
+                        traceLogger.logProtectionTrace(
                             SegmentProtectionTraceEntry(
                                 segmentName = prevSeg.segmentName,
                                 isProtected = true,
@@ -553,7 +553,7 @@ class RecordingService : Service(), LifecycleOwner {
                         )
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to copy previous segment", e)
-                        traceLogger?.logProtectionTrace(
+                        traceLogger.logProtectionTrace(
                             SegmentProtectionTraceEntry(
                                 segmentName = prevSeg.segmentName,
                                 isProtected = false,
@@ -570,7 +570,7 @@ class RecordingService : Service(), LifecycleOwner {
                 } else {
                     // ケース2: 一世代前セグメントがすでに保護済み ➔ 追加通知・保護はスキップ (通知スパム抑制)
                     coveredFiles.add(File(FileUtils.getRecordingsDir(this@RecordingService), previousCompletedFile.name).absolutePath)
-                    traceLogger?.logProtectionTrace(
+                    traceLogger.logProtectionTrace(
                         SegmentProtectionTraceEntry(
                             segmentName = prevSeg.segmentName,
                             isProtected = true,
@@ -597,7 +597,7 @@ class RecordingService : Service(), LifecycleOwner {
                 curSeg.pendingProtection = true
                 coveredFiles.add(currentFilePath)
 
-                traceLogger?.logProtectionTrace(
+                traceLogger.logProtectionTrace(
                     SegmentProtectionTraceEntry(
                         segmentName = currentSegmentName,
                         isProtected = curSeg.isProtected,
@@ -727,7 +727,7 @@ class RecordingService : Service(), LifecycleOwner {
                 Log.i("AudioStatTrace", "$timeStr\nstatsClass=${stats.javaClass.name}")
                 Log.i("AudioStatTrace", "$timeStr\naudioStats=$audioStats")
 
-                val audioAmplitude = audioStats?.audioAmplitude ?: -999
+                val audioAmplitude = audioStats.audioAmplitude ?: -999
                 val audioAmp = audioAmplitude.toFloat().coerceIn(0f, 32767f)
                 Log.i("AudioStatTrace", "$timeStr\naudioAmplitude=$audioAmplitude")
 
@@ -737,9 +737,9 @@ class RecordingService : Service(), LifecycleOwner {
 
                 if (!isAudioMuted) {
                     val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
-                    val soundSensitivity = prefs.getFloat("key_sound_sensitivity", 0.4f)
+                    val soundSensitivity = prefs.getFloat("key_sound_sensitivity", 0.6f)
                     if (audioAmp >= soundSensitivity) {
-                        handleDetectedEvent(EventType.SOUND, audioAmp, "振幅: ${(audioAmp * 100).toInt()}%")
+                        handleDetectedEvent(EventType.SOUND, audioAmp, "振幅: ${((audioAmp / 1.5f) * 100).toInt()}%")
                     }
                 }
 
@@ -775,7 +775,7 @@ class RecordingService : Service(), LifecycleOwner {
                                 seg.endTimeMs = finalizedFile.lastModified()
                                 MediaScannerConnection.scanFile(this@RecordingService, arrayOf(destFile.absolutePath), null, null)
 
-                                traceLogger?.logProtectionTrace(
+                                traceLogger.logProtectionTrace(
                                     SegmentProtectionTraceEntry(
                                         segmentName = seg.segmentName,
                                         isProtected = true,
@@ -788,7 +788,7 @@ class RecordingService : Service(), LifecycleOwner {
                                 )
                             } catch (e: Exception) {
                                 Log.e(TAG, "Failed to copy finalized segment", e)
-                                traceLogger?.logProtectionTrace(
+                                traceLogger.logProtectionTrace(
                                     SegmentProtectionTraceEntry(
                                         segmentName = seg.segmentName,
                                         isProtected = false,

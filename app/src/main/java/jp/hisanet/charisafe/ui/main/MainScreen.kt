@@ -333,7 +333,7 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                 // 音量
                 Column {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(text = "音量 ${(uiState.sensitivity.soundSensitivity * 100).toInt()}%", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "音量 ${(uiState.sensitivity.soundSensitivity / 1.5f * 100).toInt()}%", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Text(text = "${uiState.sessionEventCounts.soundCount}件", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                     ThresholdBar(
@@ -341,7 +341,7 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                         thresholdValue = uiState.sensitivity.soundSensitivity,
                         onThresholdChanged = { viewModel.updateSensitivity(uiState.sensitivity.copy(soundSensitivity = it)) },
                         minValue = 0f,
-                        maxValue = 1f
+                        maxValue = 1.5f
                     )
                 }
             }
@@ -440,7 +440,7 @@ fun ThresholdBar(
         safeMax <= 5f -> TraceMetric.COLLISION
         else -> TraceMetric.APPROACH
     }
-    TraceLogger.getInstance(context)?.log(metric, TraceLayer.UI, safeCurrent)
+    TraceLogger.getInstance(context).log(metric, TraceLayer.UI, safeCurrent)
 
     val activeTrackColor = if (isExceeding) Color.Red else MaterialTheme.colorScheme.primary
     val inactiveTrackColor = Color.DarkGray

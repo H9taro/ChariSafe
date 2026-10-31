@@ -55,7 +55,7 @@ data class EventSensitivity(
     val decelerationSensitivity: Float = 1.5f,  // 減速までの秒数
     val approachSensitivity: Float = 0.7f,      // 接近検知
     val collisionSensitivity: Float = 3.0f,     // 衝撃 G
-    val soundSensitivity: Float = 0.4f          // 音量振幅 (0〜1)
+    val soundSensitivity: Float = 0.6f          // 音量振幅 (0〜2)
 )
 
 data class RideSummary(

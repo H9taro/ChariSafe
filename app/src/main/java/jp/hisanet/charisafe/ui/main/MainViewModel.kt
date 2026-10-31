@@ -106,7 +106,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             decelerationSensitivity = prefs.getFloat("key_decel_sensitivity", 1.5f),
             approachSensitivity = prefs.getFloat("key_approach_sensitivity", 0.7f),
             collisionSensitivity = prefs.getFloat("key_collision_sensitivity", 3.0f),
-            soundSensitivity = prefs.getFloat("key_sound_sensitivity", 0.4f)
+            soundSensitivity = prefs.getFloat("key_sound_sensitivity", 0.6f)
         )
     )
     private val _currentRideSummary = MutableStateFlow<RideSummary?>(null)
@@ -241,10 +241,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             soundVal = soundVal,
             speedKmh = status.currentSpeedKmh
         )
-        TraceLogger.getInstance(getApplication())?.log(TraceMetric.APPROACH, TraceLayer.VIEWMODEL, approachVal)
-        TraceLogger.getInstance(getApplication())?.log(TraceMetric.DECELERATION, TraceLayer.VIEWMODEL, decelVal)
-        TraceLogger.getInstance(getApplication())?.log(TraceMetric.COLLISION, TraceLayer.VIEWMODEL, gVal)
-        TraceLogger.getInstance(getApplication())?.log(TraceMetric.SOUND, TraceLayer.VIEWMODEL, soundVal)
+        TraceLogger.getInstance(getApplication()).log(TraceMetric.APPROACH, TraceLayer.VIEWMODEL, approachVal)
+        TraceLogger.getInstance(getApplication()).log(TraceMetric.DECELERATION, TraceLayer.VIEWMODEL, decelVal)
+        TraceLogger.getInstance(getApplication()).log(TraceMetric.COLLISION, TraceLayer.VIEWMODEL, gVal)
+        TraceLogger.getInstance(getApplication()).log(TraceMetric.SOUND, TraceLayer.VIEWMODEL, soundVal)
         val timeStr = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
         Log.i("AudioStatTrace", "$timeStr\n6. VmCurrentSoundAmplitude=$soundVal")
 
