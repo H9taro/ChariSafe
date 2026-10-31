@@ -12,6 +12,9 @@ import jp.hisanet.charisafe.data.repository.EventLogRepositoryImpl
 import jp.hisanet.charisafe.data.repository.GpxRepositoryImpl
 import jp.hisanet.charisafe.data.repository.RecordingRepositoryImpl
 import jp.hisanet.charisafe.data.debug.DecelerationDebugLogger
+import jp.hisanet.charisafe.data.debug.TraceLayer
+import jp.hisanet.charisafe.data.debug.TraceLogger
+import jp.hisanet.charisafe.data.debug.TraceMetric
 import jp.hisanet.charisafe.domain.model.ActiveCamera
 import jp.hisanet.charisafe.domain.model.AppConfig
 import jp.hisanet.charisafe.domain.model.EventCountSummary
@@ -43,6 +46,7 @@ import java.util.Locale
 import kotlin.math.cos
 import kotlin.math.sin
 import androidx.core.content.edit
+import kotlin.time.Duration.Companion.milliseconds
 
 enum class Screen {
     MAIN, HISTORY, RIDE_RESULTS, SETTINGS
@@ -92,7 +96,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs = application.getSharedPreferences("charisafe_app_config", android.content.Context.MODE_PRIVATE)
     private val _savedEventFiles = MutableStateFlow<List<File>>(emptyList())
-    private val _selectedEventFile = MutableStateFlow<File?>(null)
     private val _currentScreen = MutableStateFlow(Screen.MAIN)
     private val _targetEventId = MutableStateFlow<String?>(null)
     private val _rideSummaries = MutableStateFlow<List<RideSummary>>(emptyList())
@@ -238,6 +241,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             soundVal = soundVal,
             speedKmh = status.currentSpeedKmh
         )
+        TraceLogger.getInstance(getApplication())?.log(TraceMetric.APPROACH, TraceLayer.VIEWMODEL, approachVal)
+        TraceLogger.getInstance(getApplication())?.log(TraceMetric.DECELERATION, TraceLayer.VIEWMODEL, decelVal)
+        TraceLogger.getInstance(getApplication())?.log(TraceMetric.COLLISION, TraceLayer.VIEWMODEL, gVal)
+        TraceLogger.getInstance(getApplication())?.log(TraceMetric.SOUND, TraceLayer.VIEWMODEL, soundVal)
         val timeStr = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
         Log.i("AudioStatTrace", "$timeStr\n6. VmCurrentSoundAmplitude=$soundVal")
 
@@ -275,7 +282,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // 定期的にイベント履歴およびインシデントを自動リロードしてUIにリアルタイム反映
         viewModelScope.launch {
             while (true) {
-                delay(2000L)
+                delay(2000L.milliseconds)
                 loadExistingEvents()
             }
         }
@@ -474,23 +481,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .putFloat("key_approach_sensitivity", sensitivity.approachSensitivity)
                 .putFloat("key_collision_sensitivity", sensitivity.collisionSensitivity)
                 .putFloat("key_sound_sensitivity", sensitivity.soundSensitivity)
-        }
-    }
-
-    fun updateClearPreviousData(clear: Boolean) {
-        val current = configRepository.getConfig()
-        configRepository.updateConfig(current.copy(clearPreviousLogsAndVideosOnStart = clear))
-    }
-
-    fun deleteRideSummary(summary: RideSummary) {
-        viewModelScope.launch {
-            val currentList = _rideSummaries.value.toMutableList()
-            currentList.remove(summary)
-            _rideSummaries.value = currentList
-            RideSummaryStore.saveSummaries(getApplication(), currentList)
-            if (_currentRideSummary.value == summary) {
-                _currentRideSummary.value = currentList.firstOrNull()
-            }
         }
     }
 

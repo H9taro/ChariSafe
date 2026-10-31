@@ -23,15 +23,21 @@ object DebugLogCleanupManager {
             val sdf = SimpleDateFormat("yyyyMMdd", Locale.US)
 
             dir.listFiles()?.forEach { file ->
-                if (file.isFile && file.name.endsWith(".csv")) {
-                    val parts = file.name.removeSuffix(".csv").split("_")
-                    val dateStr = parts.lastOrNull()
+                val isDebugCsv = file.name.endsWith(".csv")
+                val isTraceLog = file.name.startsWith("trace_") && file.name.endsWith(".log")
+
+                if (file.isFile && (isDebugCsv || isTraceLog)) {
+                    val dateStr = if (isTraceLog) {
+                        file.name.removePrefix("trace_").removeSuffix(".log")
+                    } else {
+                        file.name.removeSuffix(".csv").split("_").lastOrNull()
+                    }
                     if (dateStr != null && dateStr.length == 8) {
                         try {
                             val fileDate = sdf.parse(dateStr)
                             if (fileDate != null && fileDate.time < cutoffTime) {
                                 val deleted = file.delete()
-                                Log.i(TAG, "Deleted old debug log (${file.name}): $deleted")
+                                Log.i(TAG, "Deleted old trace/debug log (${file.name}): $deleted")
                             }
                         } catch (e: Exception) {
                             // Ignored if filename doesn't match date pattern

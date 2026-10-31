@@ -34,4 +34,10 @@ object FileUtils {
         if (!dir.exists()) dir.mkdirs()
         return dir
     }
+
+    fun getDebugDir(context: Context): File {
+        val dir = File(context.getExternalFilesDir(null), "debug")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
 }

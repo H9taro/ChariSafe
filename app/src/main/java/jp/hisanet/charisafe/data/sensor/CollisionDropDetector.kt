@@ -7,13 +7,16 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
 import jp.hisanet.charisafe.data.debug.CollisionDebugLogger
+import jp.hisanet.charisafe.data.debug.TraceLayer
+import jp.hisanet.charisafe.data.debug.TraceLogger
+import jp.hisanet.charisafe.data.debug.TraceMetric
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.sqrt
 
 class CollisionDropDetector(
-    context: Context,
+    private val context: Context,
     private val collisionDebugLogger: CollisionDebugLogger? = null,
     private val onCollisionOrDropDetected: () -> Unit
 ) : SensorEventListener {
@@ -61,6 +64,7 @@ class CollisionDropDetector(
 
             // リアルタイム StateFlow の更新 (I/Fトレーサビリティ)
             _gForceState.value = gForce
+            TraceLogger.getInstance(context)?.log(TraceMetric.COLLISION, TraceLayer.DETECTOR, gForce)
             Log.d(TAG, "📊 [Trace] gForce: ${String.format(java.util.Locale.US, "%.2f", gForce)}G")
 
             val triggered = gForce >= SHOCK_THRESHOLD_G

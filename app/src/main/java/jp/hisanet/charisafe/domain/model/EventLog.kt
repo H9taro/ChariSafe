@@ -23,10 +23,10 @@ data class EventDetectionLog(
     var segmentName: String = ""           // 発生時に録画中だったセグメント名 (例: seg_002.mp4)
 )
 
-enum class IncidentStatus(val displayName: String) {
-    PENDING("保護中..."),   // セグメント退避・メディアスキャン中
-    SUCCESS("保護完了"),       // 動画セグメントの保護・メディアスキャン完了
-    FAILED("保護失敗")         // エラー（ディスク満杯、ファイルコピー失敗等）
+enum class IncidentStatus() {
+    PENDING(),   // セグメント退避・メディアスキャン中
+    SUCCESS(),       // 動画セグメントの保護・メディアスキャン完了
+    FAILED()         // エラー（ディスク満杯、ファイルコピー失敗等）
 }
 
 data class IncidentLog(

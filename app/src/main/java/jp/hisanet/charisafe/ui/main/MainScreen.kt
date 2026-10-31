@@ -26,18 +26,22 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import jp.hisanet.charisafe.data.debug.TraceLayer
+import jp.hisanet.charisafe.data.debug.TraceLogger
+import jp.hisanet.charisafe.data.debug.TraceMetric
 import jp.hisanet.charisafe.domain.model.*
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
+import androidx.core.net.toUri
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
-    viewModel: MainViewModel,
-    modifier: Modifier = Modifier
+    viewModel: MainViewModel
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -53,7 +57,7 @@ fun MainScreen(
         val targetId = uiState.targetEventIdToHighlight
         if (targetId != null) {
             highlightedEventId = targetId
-            delay(2000L)
+            delay(2000L.milliseconds)
             highlightedEventId = null
             viewModel.setTargetEventIdToHighlight(null)
         }
@@ -425,15 +429,18 @@ fun ThresholdBar(
 
     LaunchedEffect(enablePeakHold) {
         while (enablePeakHold) {
-            delay(50L)
+            delay(50L.milliseconds)
             peakValue = maxOf(currentValueState, peakValue * peakDecayFactor)
         }
     }
 
-    if (safeMax > 1000f) {
-        val timeStr = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
-        android.util.Log.i("ChariSafeTrace", "$timeStr\nThresholdBar\ncurrentValue=${safeCurrent.toInt()}\nfraction=${String.format(Locale.US, "%.2f", currentFraction)}\nthresholdValue=${safeThreshold.toInt()}\npeakValue=${peakValue.toInt()}")
+    val context = LocalContext.current
+    val metric = when {
+        safeMax <= 1f -> TraceMetric.SOUND
+        safeMax <= 5f -> TraceMetric.COLLISION
+        else -> TraceMetric.APPROACH
     }
+    TraceLogger.getInstance(context)?.log(metric, TraceLayer.UI, safeCurrent)
 
     val activeTrackColor = if (isExceeding) Color.Red else MaterialTheme.colorScheme.primary
     val inactiveTrackColor = Color.DarkGray
@@ -570,7 +577,8 @@ fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState:
                                     .fillMaxWidth()
                                     .clickable {
                                         try {
-                                            val uri = Uri.parse("https://maps.google.com/?q=${det.latitude},${det.longitude}")
+                                            val uri =
+                                                "https://maps.google.com/?q=${det.latitude},${det.longitude}".toUri()
                                             val intent = Intent(Intent.ACTION_VIEW, uri).apply {
                                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                             }

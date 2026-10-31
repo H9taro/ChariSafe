@@ -44,6 +44,9 @@ import jp.hisanet.charisafe.data.config.ConfigRepositoryImpl
 import jp.hisanet.charisafe.data.debug.ApproachDebugLogger
 import jp.hisanet.charisafe.data.debug.CollisionDebugLogger
 import jp.hisanet.charisafe.data.debug.DebugLogCleanupManager
+import jp.hisanet.charisafe.data.debug.TraceLayer
+import jp.hisanet.charisafe.data.debug.TraceLogger
+import jp.hisanet.charisafe.data.debug.TraceMetric
 import jp.hisanet.charisafe.data.local.EventDetectionLogStore
 import jp.hisanet.charisafe.data.local.IncidentLogStore
 import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
@@ -72,7 +75,7 @@ import java.util.Locale
 import java.util.concurrent.Executors
 
 class RecordingService : Service(), LifecycleOwner {
-
+    private lateinit var traceLogger: TraceLogger
     companion object {
         private const val TAG = "RecordingService"
         private const val CHANNEL_ID = "charisafe_recording_channel"
@@ -123,7 +126,6 @@ class RecordingService : Service(), LifecycleOwner {
         get() = _soundAmplitudeState.asStateFlow()
     private var approachDebugLogger: ApproachDebugLogger? = null
     private var collisionDebugLogger: CollisionDebugLogger? = null
-    private var traceLogger: jp.hisanet.charisafe.data.debug.TraceLogger? = null
     private var recordingStartTimeMs: Long = 0L
     private var recordingStopContinuation: CancellableContinuation<Unit>? = null
     private var statusEventCount = 0
@@ -165,12 +167,12 @@ class RecordingService : Service(), LifecycleOwner {
 
     override fun onCreate() {
         super.onCreate()
+        traceLogger = TraceLogger.getInstance(this)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
 
         ringBufferManager = RingBufferManager(this, ringBufferMinutes)
-        traceLogger = jp.hisanet.charisafe.data.debug.TraceLogger(this)
         createNotificationChannel()
         DebugLogCleanupManager.cleanOldLogs(this)
         approachDebugLogger = ApproachDebugLogger(this)
@@ -317,6 +319,9 @@ class RecordingService : Service(), LifecycleOwner {
             return
         }
 
+        val sessionId = "REC_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        traceLogger.startSession(sessionId)
+
         ringBufferManager?.clearAll()
 
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
@@ -370,6 +375,7 @@ class RecordingService : Service(), LifecycleOwner {
         approachCollectJob = serviceScope.launch {
             detector.approachScoreState.collect { score ->
                 _approachScoreState.value = score
+                traceLogger.log(TraceMetric.APPROACH, TraceLayer.SERVICE, score)
                 val timeStr = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
                 Log.i("ApproachTrace", "$timeStr\nService=$score")
             }
@@ -720,6 +726,7 @@ class RecordingService : Service(), LifecycleOwner {
                 Log.i("AudioStatTrace", "$timeStr\naudioAmplitude=$audioAmplitude")
 
                 _soundAmplitudeState.value = audioAmp
+                traceLogger.log(TraceMetric.SOUND, TraceLayer.SERVICE, audioAmp)
                 Log.i("AudioCompare", "cameraXAmplitude=$audioAmp")
 
                 if (!isAudioMuted) {
@@ -888,6 +895,7 @@ class RecordingService : Service(), LifecycleOwner {
         _serviceState.value = _serviceState.value.copy(
             isRecording = false
         )
+        traceLogger.endSession()
         Log.i(TAG, "✅ 録画パイプラインの安全停止処理が完了しました")
     }
 

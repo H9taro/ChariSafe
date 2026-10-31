@@ -2,89 +2,184 @@ package jp.hisanet.charisafe.data.debug
 
 import android.content.Context
 import android.util.Log
-import jp.hisanet.charisafe.domain.model.EventTraceEntry
-import jp.hisanet.charisafe.domain.model.EventType
-import jp.hisanet.charisafe.domain.model.SegmentProtectionTraceEntry
+import jp.hisanet.charisafe.util.FileUtils
+import java.io.BufferedWriter
 import java.io.File
 import java.io.FileWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.abs
 
-/**
- * 系統 A: イベント判定トレースロガー
- */
-class TraceLogger(private val context: Context) {
+enum class TraceMetric {
+    APPROACH,
+    DECELERATION,
+    COLLISION,
+    SOUND,
+
+    RECORDING_STATE,
+    SEGMENT
+}
+
+enum class TraceLayer {
+    DETECTOR,
+    SERVICE,
+    REPOSITORY,
+    VIEWMODEL,
+    UI,
+    SYSTEM
+}
+
+class TraceLogger private constructor(private val context: Context) {
 
     companion object {
         private const val TAG = "TraceLogger"
-        private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", Locale.US)
-    }
 
-    private fun getDebugDir(): File {
-        val dir = context.getExternalFilesDir("debug") ?: File(context.filesDir, "debug")
-        if (!dir.exists()) dir.mkdirs()
-        return dir
-    }
+        private var instance: TraceLogger? = null
 
-    @Synchronized
-    fun logEventTrace(entry: EventTraceEntry) {
-        try {
-            val dateStr = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date(entry.timestampMs))
-            val prefix = when (entry.eventType) {
-                EventType.APPROACH -> "approach_trace"
-                EventType.DECELERATION -> "deceleration_trace"
-                EventType.COLLISION -> "collision_trace"
-                EventType.SOUND -> "audio_trace"
-            }
-            val fileName = "${prefix}_$dateStr.csv"
-            val file = File(getDebugDir(), fileName)
-
-            val isNew = !file.exists()
-            FileWriter(file, true).use { writer ->
-                if (isNew) {
-                    val header = when (entry.eventType) {
-                        EventType.APPROACH -> "timestamp,segmentName,approachScore,threshold,isTriggered"
-                        EventType.DECELERATION -> "timestamp,segmentName,speedRawKmh,speedEmaKmh,decelerationMs2,thresholdMs2,consecutiveCount,isTriggered"
-                        EventType.COLLISION -> "timestamp,segmentName,gValue,thresholdG,isTriggered"
-                        EventType.SOUND -> "timestamp,segmentName,amplitude,thresholdAmplitude,isMuted,isTriggered"
-                    }
-                    writer.append("$header\n")
+        fun getInstance(context: Context): TraceLogger {
+            return instance ?: synchronized(this) {
+                instance ?: TraceLogger(
+                    context.applicationContext
+                ).also {
+                    instance = it
                 }
-
-                val isoTime = dateFormat.format(Date(entry.timestampMs))
-                val row = when (entry.eventType) {
-                    EventType.APPROACH -> "$isoTime,${entry.segmentName},${entry.currentValue},${entry.thresholdValue},${entry.isTriggered}"
-                    EventType.DECELERATION -> "$isoTime,${entry.segmentName},${entry.rawValue},${entry.smoothedValue},${entry.currentValue},${entry.thresholdValue},${entry.consecutiveCount},${entry.isTriggered}"
-                    EventType.COLLISION -> "$isoTime,${entry.segmentName},${entry.currentValue},${entry.thresholdValue},${entry.isTriggered}"
-                    EventType.SOUND -> "$isoTime,${entry.segmentName},${entry.currentValue},${entry.thresholdValue},${entry.isMuted},${entry.isTriggered}"
-                }
-                writer.append("$row\n")
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to write event trace entry", e)
         }
     }
 
-    @Synchronized
-    fun logProtectionTrace(entry: SegmentProtectionTraceEntry) {
-        try {
-            val dateStr = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date(entry.timestampMs))
-            val fileName = "segment_protection_trace_$dateStr.csv"
-            val file = File(getDebugDir(), fileName)
+    private val executor = Executors.newSingleThreadExecutor()
+    private val sequenceNo = AtomicLong(1L)
+    @Volatile
+    private var currentSessionId: String = "SESSION_IDLE"
 
-            val isNew = !file.exists()
-            FileWriter(file, true).use { writer ->
-                if (isNew) {
-                    writer.append("timestamp,segmentName,isProtected,pendingProtection,triggerEvent,reason,notificationSent,operationSucceeded,failureReason,associatedEventId\n")
-                }
-                val isoTime = dateFormat.format(Date(entry.timestampMs))
-                val failStr = entry.failureReason?.name ?: ""
-                val row = "$isoTime,${entry.segmentName},${entry.isProtected},${entry.pendingProtection},${entry.triggerEventType},${entry.protectionReason.name},${entry.notificationSent},${entry.operationSucceeded},$failStr,${entry.associatedEventId ?: ""}"
-                writer.append("$row\n")
+    // ノイズ抑制用の記録マップ
+    private val lastValues = ConcurrentHashMap<String, Float>()
+    private val lastTimes = ConcurrentHashMap<String, Long>()
+
+    // 将来的な機能拡張フラグ
+    @Volatile
+    var isEnabled: Boolean = true
+
+    fun startSession(sessionId: String) {
+        currentSessionId = sessionId
+        log(
+            metric = TraceMetric.RECORDING_STATE,
+            layer = TraceLayer.SYSTEM,
+            value = 1.0f,
+            extra = "START_SESSION",
+            force = true
+        )
+    }
+
+    fun endSession() {
+        log(
+            metric = TraceMetric.RECORDING_STATE,
+            layer = TraceLayer.SYSTEM,
+            value = 0.0f,
+            extra = "END_SESSION",
+            force = true
+        )
+        currentSessionId = "SESSION_IDLE"
+    }
+
+    fun logProtectionTrace(entry: Any) {
+        log(
+            metric = TraceMetric.SEGMENT,
+            layer = TraceLayer.SYSTEM,
+            value = 1.0f,
+            extra = entry.toString(),
+            force = true
+        )
+    }
+
+    fun log(
+        metric: TraceMetric,
+        layer: TraceLayer,
+        value: Float,
+        extra: String? = null,
+        force: Boolean = false
+    ) {
+        if (!isEnabled) return
+
+        val now = System.currentTimeMillis()
+        val key = "${metric.name}_${layer.name}"
+
+        if (!force && !shouldLog(metric, key, value, now, extra)) {
+            return
+        }
+
+        // 状態更新
+        lastValues[key] = value
+        lastTimes[key] = now
+
+        val seq = sequenceNo.getAndIncrement()
+        val sessionId = currentSessionId
+
+        executor.execute {
+            try {
+                writeLogLine(now, sessionId, seq, metric, layer, value, extra)
+            } catch (e: Exception) {
+                Log.e(TAG, "TraceLogger write error", e)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to write protection trace entry", e)
+        }
+    }
+
+    private fun shouldLog(
+        metric: TraceMetric,
+        key: String,
+        newValue: Float,
+        now: Long,
+        extra: String?
+    ): Boolean {
+        if (extra != null) return true
+
+        val lastVal = lastValues[key] ?: return true
+        val lastTime = lastTimes[key] ?: return true
+
+        // 2秒ハートビート
+        if (now - lastTime >= 2000L) {
+            return true
+        }
+
+        // 変化量判定 (Metric別)
+        val threshold = when (metric) {
+            TraceMetric.APPROACH -> 1.0f
+            TraceMetric.DECELERATION -> 0.1f
+            TraceMetric.COLLISION -> 0.1f
+            TraceMetric.SOUND -> 0.01f
+            else -> 0f
+        }
+
+        return abs(newValue - lastVal) >= threshold
+    }
+
+    private fun writeLogLine(
+        timestampMs: Long,
+        sessionId: String,
+        seqNo: Long,
+        metric: TraceMetric,
+        layer: TraceLayer,
+        value: Float,
+        extra: String?
+    ) {
+        val dateStr = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date(timestampMs))
+        val timeStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date(timestampMs))
+        val seqFormatted = String.format(Locale.US, "#%08d", seqNo)
+
+        val debugDir = FileUtils.getDebugDir(context)
+        val logFile = File(debugDir, "trace_$dateStr.log")
+
+        val extraPart = if (extra != null) " | $extra" else ""
+        val line = "$timeStr | $sessionId | $seqFormatted | ${metric.name} | ${layer.name} | ${String.format(Locale.US, "%.6f", value)}$extraPart"
+
+        BufferedWriter(FileWriter(logFile, true)).use { writer ->
+            writer.write(line)
+            writer.newLine()
+            writer.flush()
         }
     }
 }

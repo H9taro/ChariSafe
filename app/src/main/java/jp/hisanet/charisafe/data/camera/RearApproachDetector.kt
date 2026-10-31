@@ -6,6 +6,9 @@ import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import jp.hisanet.charisafe.data.debug.ApproachDebugLogger
+import jp.hisanet.charisafe.data.debug.TraceLayer
+import jp.hisanet.charisafe.data.debug.TraceLogger
+import jp.hisanet.charisafe.data.debug.TraceMetric
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,7 +22,7 @@ class RearApproachDetector(
     private val getApproachSensitivity: () -> Float = { 0.7f },
     private val onApproachDetected: () -> Unit
 ) : ImageAnalysis.Analyzer {
-
+    private lateinit var traceLogger: TraceLogger
     constructor(getApproachSensitivity: () -> Float, onApproachDetected: () -> Unit) : this(null, getApproachSensitivity, onApproachDetected)
     constructor(onApproachDetected: () -> Unit) : this(null, { 0.7f }, onApproachDetected)
 
@@ -34,7 +37,7 @@ class RearApproachDetector(
 
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
 
-    private val ratioHistory = FloatArray(5) { 0f }
+    private val ratioHistory = FloatArray(5)
     private var historyIndex = 0
     private var consecutiveCount = 0
 
@@ -118,6 +121,7 @@ class RearApproachDetector(
                 consecutiveCount = consecutiveCount,
                 triggered = triggered
             )
+            traceLogger.log(TraceMetric.APPROACH, TraceLayer.DETECTOR, approachScore)
             val timeStr = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
             Log.i(
                 "ApproachTrace",
