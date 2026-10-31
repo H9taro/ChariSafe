@@ -12,7 +12,9 @@ import jp.hisanet.charisafe.util.FileUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -48,8 +50,19 @@ class GpxRepositoryImpl(
         onDecelerationDetected?.invoke()
     }
 
+    private val _decelerationState = MutableStateFlow(0f)
+    override val decelerationState: StateFlow<Float> = _decelerationState.asStateFlow()
+
     override val currentGpxPoint: StateFlow<GpxPoint?>
         get() = locationTracker.currentLocation
+
+    init {
+        repositoryScope.launch {
+            decelerationDetector.decelerationState.collect {
+                _decelerationState.value = it
+            }
+        }
+    }
 
     override fun startLogging(intervalSeconds: Long) {
         val gpxDir = FileUtils.getGpxDir(context)

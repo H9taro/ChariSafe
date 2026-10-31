@@ -88,6 +88,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val decelerationDebugLogger = DecelerationDebugLogger(application)
     private val gpxRepository: GpxRepository = GpxRepositoryImpl(application, decelerationDebugLogger)
     private val eventLogRepository: EventLogRepository = EventLogRepositoryImpl(application)
+    private val uiStateDebugLogger = jp.hisanet.charisafe.data.debug.UiStateDebugLogger(application)
 
     private val prefs = application.getSharedPreferences("charisafe_app_config", android.content.Context.MODE_PRIVATE)
     private val _savedEventFiles = MutableStateFlow<List<File>>(emptyList())
@@ -102,7 +103,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             decelerationSensitivity = prefs.getFloat("key_decel_sensitivity", 1.5f),
             approachSensitivity = prefs.getFloat("key_approach_sensitivity", 0.7f),
             collisionSensitivity = prefs.getFloat("key_collision_sensitivity", 3.0f),
-            soundSensitivity = prefs.getFloat("key_sound_sensitivity", 5000.0f)
+            soundSensitivity = prefs.getFloat("key_sound_sensitivity", 0.4f)
         )
     )
     private val _currentRideSummary = MutableStateFlow<RideSummary?>(null)
@@ -120,11 +121,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         combine(_currentScreen, _targetEventId, _sensitivity) { screen, targetId, sens ->
             Triple(screen, targetId, sens)
         },
-        combine(_currentRideSummary, _rideSummaries, _sessionStartTimeMs) { currentSum, summaries, sessionStart ->
-            Triple(currentSum, summaries, sessionStart)
+        combine(_currentRideSummary, _rideSummaries, _sessionStartTimeMs, _isZipGenerating) { currentSum, summaries, sessionStart, isZipGen ->
+            listOf(currentSum, summaries, sessionStart, isZipGen)
         },
-        _isZipGenerating
-    ) { p1, p2, p3, p4, isZipGen ->
+        combine(recordingRepository.approachScoreState, gpxRepository.decelerationState, recordingRepository.gForceState, recordingRepository.soundAmplitudeState) { app, dec, g, snd ->
+            listOf(app, dec, g, snd)
+        }
+    ) { p1, p2, p3, p4, pLive ->
         val config = p1.first
         val state = p1.second
         val gpxPoint = p1.third
@@ -137,9 +140,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val targetId = p3.second
         val sensitivity = p3.third
 
-        val currentSum = p4.first
-        val summaries = p4.second
-        val sessionStart = p4.third
+        val currentSum = p4[0] as? RideSummary
+        @Suppress("UNCHECKED_CAST")
+        val summaries = p4[1] as? List<RideSummary> ?: emptyList()
+        val sessionStart = p4[2] as Long
+        val isZipGen = p4[3] as Boolean
+
+        val approachVal = pLive[0]
+        val decelVal = pLive[1]
+        val gVal = pLive[2]
+        val soundVal = pLive[3]
 
         val status = SystemStatus(
             state = state,
@@ -202,34 +212,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             movingSec = totalActiveSec
         }
 
-        val now = System.currentTimeMillis()
-        val latestDet = detections.firstOrNull()
-        val isRecentEvent = latestDet != null && (now - latestDet.timestampMs < 2000L)
-
-        val approachVal = if (isRecentEvent && latestDet?.eventType == EventType.APPROACH) {
-            (latestDet.sensitivityValue * 100f).coerceIn(30f, 100f)
-        } else {
-            ((gpxPoint?.speedKmh ?: 0f) * 1.5f).coerceIn(30f, 100f)
-        }
-
-        val decelVal = if (isRecentEvent && latestDet?.eventType == EventType.DECELERATION) {
-            latestDet.sensitivityValue.coerceIn(1.0f, 4.0f)
-        } else {
-            1.0f
-        }
-
-        val gVal = if (isRecentEvent && latestDet?.eventType == EventType.COLLISION) {
-            latestDet.sensitivityValue.coerceIn(2.0f, 5.0f)
-        } else {
-            2.0f
-        }
-
-        val soundVal = if (isRecentEvent && latestDet?.eventType == EventType.SOUND) {
-            latestDet.sensitivityValue.coerceIn(1000f, 10000f)
-        } else {
-            1000f
-        }
-
         val liveSummary = RideSummary(
             startTimeMs = activeStart,
             endTimeMs = System.currentTimeMillis(),
@@ -248,6 +230,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             soundPerKm = if (totalDistKm > 0.0) totalCounts.soundCount.toFloat() / totalDistKm.toFloat() else 0f,
             soundPerHour = (totalCounts.soundCount.toFloat() / hours).toFloat()
         )
+
+        uiStateDebugLogger.log(
+            approachScore = approachVal,
+            decelVal = decelVal,
+            gVal = gVal,
+            soundVal = soundVal,
+            speedKmh = status.currentSpeedKmh
+        )
+        val timeStr = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
+        Log.i("AudioStatTrace", "$timeStr\n6. VmCurrentSoundAmplitude=$soundVal")
 
         MainUiState(
             config = config,

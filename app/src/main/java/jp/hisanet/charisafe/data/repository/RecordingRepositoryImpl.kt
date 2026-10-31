@@ -10,9 +10,13 @@ import jp.hisanet.charisafe.data.service.RecordingService
 import jp.hisanet.charisafe.domain.model.AppConfig
 import jp.hisanet.charisafe.domain.model.RecordingState
 import jp.hisanet.charisafe.domain.repository.RecordingRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 class RecordingRepositoryImpl(private val context: Context) : RecordingRepository {
 
@@ -22,9 +26,20 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
 
     private var recordingService: RecordingService? = null
     private var isBound = false
+    private val repoScope = CoroutineScope(Dispatchers.IO + Job())
+    private var serviceCollectJob: Job? = null
 
     private val _recordingState = MutableStateFlow(RecordingState.IDLE)
     override val recordingState: StateFlow<RecordingState> = _recordingState.asStateFlow()
+
+    private val _approachScoreState = MutableStateFlow(0f)
+    override val approachScoreState: StateFlow<Float> = _approachScoreState.asStateFlow()
+
+    private val _gForceState = MutableStateFlow(0f)
+    override val gForceState: StateFlow<Float> = _gForceState.asStateFlow()
+
+    private val _soundAmplitudeState = MutableStateFlow(0f)
+    override val soundAmplitudeState: StateFlow<Float> = _soundAmplitudeState.asStateFlow()
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -32,6 +47,22 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
             recordingService = binder?.getService()
             isBound = true
             Log.i(TAG, "Bound to RecordingService")
+
+            serviceCollectJob?.cancel()
+            serviceCollectJob = repoScope.launch {
+                recordingService?.let { s ->
+                    launch {
+                        s.approachScoreState.collect {
+                            _approachScoreState.value = it
+                            val timeStr = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
+                            Log.i("ApproachTrace", "$timeStr\nRepo=$it")
+                            Log.d(TAG, "📊 [TraceRepo] approach: $it")
+                        }
+                    }
+                    launch { s.gForceState.collect { _gForceState.value = it; Log.d(TAG, "📊 [TraceRepo] gForce: $it") } }
+                    launch { s.soundAmplitudeState.collect { _soundAmplitudeState.value = it; val timeStr = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date()); Log.i("AudioStatTrace", "$timeStr\n5. RepoReceived=$it") } }
+                }
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {

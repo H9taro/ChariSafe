@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.StateFlow
 
 interface GpxRepository {
     val currentGpxPoint: StateFlow<GpxPoint?>
+    val decelerationState: StateFlow<Float>
     fun startLogging(intervalSeconds: Long)
     fun stopLogging()
     fun getActiveGpxFilePath(): String?

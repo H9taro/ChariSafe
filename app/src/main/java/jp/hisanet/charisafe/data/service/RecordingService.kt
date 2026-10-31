@@ -42,26 +42,29 @@ import jp.hisanet.charisafe.R
 import jp.hisanet.charisafe.data.camera.RearApproachDetector
 import jp.hisanet.charisafe.data.config.ConfigRepositoryImpl
 import jp.hisanet.charisafe.data.debug.ApproachDebugLogger
-import jp.hisanet.charisafe.data.debug.AudioDebugLogger
 import jp.hisanet.charisafe.data.debug.CollisionDebugLogger
 import jp.hisanet.charisafe.data.debug.DebugLogCleanupManager
 import jp.hisanet.charisafe.data.local.EventDetectionLogStore
 import jp.hisanet.charisafe.data.local.IncidentLogStore
 import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
 import jp.hisanet.charisafe.data.location.LocationTracker
-import jp.hisanet.charisafe.data.sensor.AudioImpactDetector
 import jp.hisanet.charisafe.data.sensor.CollisionDropDetector
 import jp.hisanet.charisafe.domain.model.*
 import jp.hisanet.charisafe.domain.repository.ConfigRepository
 import jp.hisanet.charisafe.util.FileUtils
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -104,13 +107,26 @@ class RecordingService : Service(), LifecycleOwner {
     private var imageAnalysis: ImageAnalysis? = null
     private var activeRecording: Recording? = null
     private var ringBufferManager: RingBufferManager? = null
+    private var rearApproachDetector: RearApproachDetector? = null
     private var collisionDropDetector: CollisionDropDetector? = null
-    private var audioImpactDetector: AudioImpactDetector? = null
+
+    private val _soundAmplitudeState = MutableStateFlow(0f)
+    private val _approachScoreState = MutableStateFlow(0f)
+    private var approachCollectJob: Job? = null
+    var isAudioMuted = false
+
+    val approachScoreState: StateFlow<Float>
+        get() = _approachScoreState.asStateFlow()
+    val gForceState: StateFlow<Float>
+        get() = collisionDropDetector?.gForceState ?: MutableStateFlow(0f)
+    val soundAmplitudeState: StateFlow<Float>
+        get() = _soundAmplitudeState.asStateFlow()
     private var approachDebugLogger: ApproachDebugLogger? = null
-    private var audioDebugLogger: AudioDebugLogger? = null
     private var collisionDebugLogger: CollisionDebugLogger? = null
     private var traceLogger: jp.hisanet.charisafe.data.debug.TraceLogger? = null
     private var recordingStartTimeMs: Long = 0L
+    private var recordingStopContinuation: CancellableContinuation<Unit>? = null
+    private var statusEventCount = 0
 
     private val activeSegments = java.util.Collections.synchronizedMap(mutableMapOf<String, RecordingSegment>())
 
@@ -158,25 +174,12 @@ class RecordingService : Service(), LifecycleOwner {
         createNotificationChannel()
         DebugLogCleanupManager.cleanOldLogs(this)
         approachDebugLogger = ApproachDebugLogger(this)
-        audioDebugLogger = AudioDebugLogger(this)
         collisionDebugLogger = CollisionDebugLogger(this)
 
         collisionDropDetector = CollisionDropDetector(this, collisionDebugLogger) {
             val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
             val sens = prefs.getFloat("key_collision_sensitivity", 3.0f)
             handleDetectedEvent(EventType.COLLISION, sens, "G: ${String.format(Locale.US, "%.1f", sens)}G")
-        }
-
-        audioImpactDetector = AudioImpactDetector(
-            audioDebugLogger = audioDebugLogger,
-            getSoundSensitivityAmplitude = {
-                val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
-                prefs.getFloat("key_sound_sensitivity", 5000.0f)
-            }
-        ) {
-            val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
-            val sens = prefs.getFloat("key_sound_sensitivity", 5000.0f)
-            handleDetectedEvent(EventType.SOUND, sens, "振幅: ${sens.toInt()}")
         }
     }
 
@@ -206,15 +209,15 @@ class RecordingService : Service(), LifecycleOwner {
                 startForegroundWithNotification()
                 acquireWakeLock()
                 collisionDropDetector?.startListening()
-                audioImpactDetector?.startListening()
                 startRecordingPipeline()
                 startSegmentRotationTimer()
             }
             ACTION_STOP_RECORDING -> {
                 collisionDropDetector?.stopListening()
-                audioImpactDetector?.stopListening()
-                stopRecordingPipeline()
-                stopForegroundAndSelf()
+                serviceScope.launch {
+                    stopRecordingPipeline()
+                    stopForegroundAndSelf()
+                }
             }
         }
         return START_NOT_STICKY
@@ -281,7 +284,7 @@ class RecordingService : Service(), LifecycleOwner {
         startForeground(
             NOTIFICATION_ID,
             notification,
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         )
     }
 
@@ -354,11 +357,25 @@ class RecordingService : Service(), LifecycleOwner {
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
             .build()
 
-        analysis.setAnalyzer(analysisExecutor, RearApproachDetector {
+        val detector = RearApproachDetector(approachDebugLogger, {
+            val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
+            prefs.getFloat("key_approach_sensitivity", 0.7f)
+        }) {
             val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
             val sens = prefs.getFloat("key_approach_sensitivity", 0.7f)
             handleDetectedEvent(EventType.APPROACH, sens, "感度: ${(sens * 100).toInt()}%")
-        })
+        }
+        rearApproachDetector = detector
+        approachCollectJob?.cancel()
+        approachCollectJob = serviceScope.launch {
+            detector.approachScoreState.collect { score ->
+                _approachScoreState.value = score
+                val timeStr = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
+                Log.i("ApproachTrace", "$timeStr\nService=$score")
+            }
+        }
+
+        analysis.setAnalyzer(analysisExecutor, detector)
 
         imageAnalysis = analysis
 
@@ -444,7 +461,7 @@ class RecordingService : Service(), LifecycleOwner {
             decelerationSensitivity = prefs.getFloat("key_decel_sensitivity", 1.5f),
             approachSensitivity = prefs.getFloat("key_approach_sensitivity", 0.7f),
             collisionSensitivity = prefs.getFloat("key_collision_sensitivity", 3.0f),
-            soundSensitivity = prefs.getFloat("key_sound_sensitivity", 5000.0f)
+            soundSensitivity = prefs.getFloat("key_sound_sensitivity", 0.4f)
         )
 
         val detectionLog = EventDetectionLog(
@@ -465,18 +482,18 @@ class RecordingService : Service(), LifecycleOwner {
         serviceScope.launch(Dispatchers.IO) {
             try {
                 if (eventType == EventType.APPROACH) {
-                    audioImpactDetector?.isMuted = true
+                    isAudioMuted = true
                     toneGenerator.startTone(ToneGenerator.TONE_DTMF_S, 800)
                     Log.i(TAG, "🔊 接近警告音鳴動 (音量検知一時ミュート開始)")
                     Thread.sleep(800L)
-                    audioImpactDetector?.isMuted = false
+                    isAudioMuted = false
                     Log.i(TAG, "🔊 接近警告音終了 (音量検知ミュート解除)")
                 } else {
                     Log.i(TAG, "ℹ️ ${eventType.displayName}検知: 警告音なしでセグメント保護を実行します")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to handle alert tone / mute", e)
-                audioImpactDetector?.isMuted = false
+                isAudioMuted = false
             }
 
             val currentFilePath = _serviceState.value.currentFile
@@ -680,18 +697,48 @@ class RecordingService : Service(), LifecycleOwner {
     }
 
     private fun handleRecordEvent(event: VideoRecordEvent, filePath: String) {
+        Log.i(
+            "RecordEventTrace",
+            "event=${event.javaClass.simpleName}"
+        )
         when (event) {
             is VideoRecordEvent.Start -> {
                 Log.i(TAG, "Started recording segment: $filePath")
             }
             is VideoRecordEvent.Status -> {
+                statusEventCount++
                 val stats = event.recordingStats
+                val audioStats = stats.audioStats
+                val timeStr = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
+
+                Log.i("AudioStatTrace", "$timeStr\nStatus entered")
+                Log.i("AudioStatTrace", "$timeStr\nstatsClass=${stats.javaClass.name}")
+                Log.i("AudioStatTrace", "$timeStr\naudioStats=$audioStats")
+
+                val audioAmplitude = audioStats?.audioAmplitude ?: -999
+                val audioAmp = audioAmplitude.toFloat().coerceIn(0f, 32767f)
+                Log.i("AudioStatTrace", "$timeStr\naudioAmplitude=$audioAmplitude")
+
+                _soundAmplitudeState.value = audioAmp
+                Log.i("AudioCompare", "cameraXAmplitude=$audioAmp")
+
+                if (!isAudioMuted) {
+                    val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
+                    val soundSensitivity = prefs.getFloat("key_sound_sensitivity", 0.4f)
+                    if (audioAmp >= soundSensitivity) {
+                        handleDetectedEvent(EventType.SOUND, audioAmp, "振幅: ${(audioAmp * 100).toInt()}%")
+                    }
+                }
+
                 _serviceState.value = _serviceState.value.copy(
                     recordedBytes = stats.numBytesRecorded,
                     elapsedTimeSec = stats.recordedDurationNanos / 1_000_000_000L
                 )
             }
             is VideoRecordEvent.Finalize -> {
+                recordingStopContinuation?.resume(Unit)
+                recordingStopContinuation = null
+
                 if (event.hasError()) {
                     Log.i(TAG, "Segment recording finalized with error: ${event.error}")
                     _serviceState.value = _serviceState.value.copy(
@@ -784,19 +831,64 @@ class RecordingService : Service(), LifecycleOwner {
         }
     }
 
-    private fun stopRecordingPipeline() {
+    private suspend fun stopRecordingPipeline() {
+        Log.i(TAG, "🛑 録画パイプラインの安全停止処理を開始します")
+
+        // 1. セグメント切替タイマーの停止
         stopSegmentRotationTimer()
 
-        activeRecording?.stop()
-        activeRecording = null
+        // 2. ImageAnalysis アナライザーの即時解除 (遅延フレーム解析タスクの遮断)
+        try {
+            imageAnalysis?.clearAnalyzer()
+            Log.i(TAG, "🧹 imageAnalysis アナライザーを正常に解除しました")
+        } catch (e: Exception) {
+            Log.e(TAG, "clearAnalyzer 実行エラー", e)
+        }
 
-        cameraProvider?.unbindAll()
+        // 3. 録画停止指示と VideoRecordEvent.Finalize 完了の待機 (タイムアウト 3000ms)
+        val recording = activeRecording
+        if (recording != null) {
+            activeRecording = null
+            try {
+                val finalizedResult = withTimeoutOrNull(3000L) {
+                    suspendCancellableCoroutine<Unit> { continuation ->
+                        recordingStopContinuation = continuation
+                        recording.stop()
+                    }
+                }
+                if (finalizedResult == null) {
+                    Log.w(TAG, "⚠️ 録画ファイルのファイナライズ (Finalized) 待機が 3000ms でタイムアウトしました。強制的にリソース解放へ移行します")
+                } else {
+                    Log.i(TAG, "🎬 録画ファイルのファイナライズ (Finalized) を確認しました")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "録画停止待機エラー", e)
+            } finally {
+                recordingStopContinuation = null
+            }
+        }
+
+        // 4. Finalized 確認後の参照クリアおよび CameraProvider のアンバインド
+        rearApproachDetector = null
+        imageAnalysis = null
+
+        try {
+            cameraProvider?.unbindAll()
+            videoCapture = null
+            cameraProvider = null
+            Log.i(TAG, "📷 cameraProvider を安全にアンバインドし、参照をクリアしました")
+        } catch (e: Exception) {
+            Log.e(TAG, "cameraProvider.unbindAll エラー", e)
+        }
+
+        // 5. WakeLock 解放
         releaseWakeLock()
 
+        // 6. サービス状態更新
         _serviceState.value = _serviceState.value.copy(
             isRecording = false
         )
-        Log.i(TAG, "Stopped recording pipeline")
+        Log.i(TAG, "✅ 録画パイプラインの安全停止処理が完了しました")
     }
 
     private fun stopForegroundAndSelf() {
@@ -830,8 +922,6 @@ class RecordingService : Service(), LifecycleOwner {
 
     override fun onDestroy() {
         collisionDropDetector?.stopListening()
-        collisionDropDetector?.stopListening()
-        audioImpactDetector?.stopListening()
         analysisExecutor.shutdown()
         toneGenerator.release()
         super.onDestroy()

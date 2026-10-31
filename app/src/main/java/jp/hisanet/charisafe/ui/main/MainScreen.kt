@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -21,6 +22,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
@@ -280,20 +282,16 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 // 接近
                 Column {
+                    android.util.Log.i("ApproachTrace","UI=${uiState.currentApproachScore}")
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(text = "接近 ${(uiState.sensitivity.approachSensitivity * 100).toInt()}%", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Text(text = "${uiState.sessionEventCounts.approachCount}件", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
-                    Slider(
-                        value = uiState.sensitivity.approachSensitivity,
-                        onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(approachSensitivity = it)) },
-                        valueRange = 0.3f..1.0f,
-                        steps = 7
-                    )
-                    RealtimeComparisonBar(
+                    ThresholdBar(
                         currentValue = uiState.currentApproachScore,
                         thresholdValue = uiState.sensitivity.approachSensitivity * 100f,
-                        minValue = 30f,
+                        onThresholdChanged = { viewModel.updateSensitivity(uiState.sensitivity.copy(approachSensitivity = it / 100f)) },
+                        minValue = 0f,
                         maxValue = 100f
                     )
                 }
@@ -304,17 +302,12 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                         Text(text = "減速 ${String.format(Locale.US, "%.1f", uiState.sensitivity.decelerationSensitivity)} m/s²", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Text(text = "${uiState.sessionEventCounts.decelerationCount}件", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
-                    Slider(
-                        value = uiState.sensitivity.decelerationSensitivity,
-                        onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(decelerationSensitivity = it)) },
-                        valueRange = 1.0f..4.0f,
-                        steps = 29
-                    )
-                    RealtimeComparisonBar(
+                    ThresholdBar(
                         currentValue = uiState.currentDecelValue,
                         thresholdValue = uiState.sensitivity.decelerationSensitivity,
-                        minValue = 1.0f,
-                        maxValue = 4.0f
+                        onThresholdChanged = { viewModel.updateSensitivity(uiState.sensitivity.copy(decelerationSensitivity = it)) },
+                        minValue = 0f,
+                        maxValue = 5f
                     )
                 }
 
@@ -324,37 +317,27 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                         Text(text = "衝撃 ${String.format(Locale.US, "%.1f", uiState.sensitivity.collisionSensitivity)}G", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Text(text = "${uiState.sessionEventCounts.collisionCount}件", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
-                    Slider(
-                        value = uiState.sensitivity.collisionSensitivity,
-                        onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(collisionSensitivity = it)) },
-                        valueRange = 2.0f..5.0f,
-                        steps = 15
-                    )
-                    RealtimeComparisonBar(
+                    ThresholdBar(
                         currentValue = uiState.currentGValue,
                         thresholdValue = uiState.sensitivity.collisionSensitivity,
-                        minValue = 2.0f,
-                        maxValue = 5.0f
+                        onThresholdChanged = { viewModel.updateSensitivity(uiState.sensitivity.copy(collisionSensitivity = it)) },
+                        minValue = 0f,
+                        maxValue = 5f
                     )
                 }
 
                 // 音量
                 Column {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(text = "音量 ${uiState.sensitivity.soundSensitivity.toInt()}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "音量 ${(uiState.sensitivity.soundSensitivity * 100).toInt()}%", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Text(text = "${uiState.sessionEventCounts.soundCount}件", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
-                    Slider(
-                        value = uiState.sensitivity.soundSensitivity,
-                        onValueChange = { viewModel.updateSensitivity(uiState.sensitivity.copy(soundSensitivity = it)) },
-                        valueRange = 1000f..10000f,
-                        steps = 18
-                    )
-                    RealtimeComparisonBar(
+                    ThresholdBar(
                         currentValue = uiState.currentSoundAmplitude,
                         thresholdValue = uiState.sensitivity.soundSensitivity,
-                        minValue = 1000f,
-                        maxValue = 10000f
+                        onThresholdChanged = { viewModel.updateSensitivity(uiState.sensitivity.copy(soundSensitivity = it)) },
+                        minValue = 0f,
+                        maxValue = 1f
                     )
                 }
             }
@@ -400,41 +383,111 @@ fun CameraShutterButton(isRecording: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * リアルタイム比較バー
+ * 統合 ThresholdBar (スライダー + リアルタイム比較バー + ピークホールド)
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RealtimeComparisonBar(
+fun ThresholdBar(
     currentValue: Float,
     thresholdValue: Float,
+    onThresholdChanged: (Float) -> Unit,
     minValue: Float,
-    maxValue: Float
+    maxValue: Float,
+    enabled: Boolean = true,
+    enablePeakHold: Boolean = true,
+    peakDecayFactor: Float = 0.97f,
+    peakColor: Color = Color(0xFFFF9800),
+    peakStrokeWidth: Dp = 2.dp
 ) {
-    val fraction = ((currentValue - minValue) / (maxValue - minValue)).coerceIn(0f, 1f)
-    val thresholdFraction = ((thresholdValue - minValue) / (maxValue - minValue)).coerceIn(0f, 1f)
-    val isExceeding = currentValue >= thresholdValue
+    // 異常値対策
+    val safeMin = if (minValue.isFinite()) minValue else 0f
+    val safeMax = if (maxValue.isFinite() && maxValue > safeMin) maxValue else (safeMin + 1f)
+    val range = safeMax - safeMin
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(10.dp)
-            .background(Color.DarkGray, RoundedCornerShape(5.dp))
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(fraction)
-                .fillMaxHeight()
-                .background(if (isExceeding) Color.Red else MaterialTheme.colorScheme.primary, RoundedCornerShape(5.dp))
-        )
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val x = size.width * thresholdFraction
-            drawLine(
-                color = Color.White,
-                start = Offset(x, 0f),
-                end = Offset(x, size.height),
-                strokeWidth = 4f
-            )
+    val safeCurrentRaw = currentValue.takeIf { it.isFinite() } ?: safeMin
+    val safeCurrent = safeCurrentRaw.coerceIn(safeMin, safeMax)
+
+    val safeThresholdRaw = thresholdValue.takeIf { it.isFinite() } ?: safeMin
+    val safeThreshold = safeThresholdRaw.coerceIn(safeMin, safeMax)
+
+    val currentFraction = if (range > 0f) ((safeCurrent - safeMin) / range).coerceIn(0f, 1f) else 0f
+    val isExceeding = safeCurrent >= safeThreshold
+
+    // ピークホールド状態管理 (rememberUpdatedStateを活用して最新値を安全に参照)
+    var peakValue by remember { mutableFloatStateOf(0f) }
+    val currentValueState by rememberUpdatedState(safeCurrent)
+
+    LaunchedEffect(safeCurrent) {
+        if (safeCurrent > peakValue) {
+            peakValue = safeCurrent
         }
     }
+
+    LaunchedEffect(enablePeakHold) {
+        while (enablePeakHold) {
+            delay(50L)
+            peakValue = maxOf(currentValueState, peakValue * peakDecayFactor)
+        }
+    }
+
+    if (safeMax > 1000f) {
+        val timeStr = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
+        android.util.Log.i("ChariSafeTrace", "$timeStr\nThresholdBar\ncurrentValue=${safeCurrent.toInt()}\nfraction=${String.format(Locale.US, "%.2f", currentFraction)}\nthresholdValue=${safeThreshold.toInt()}\npeakValue=${peakValue.toInt()}")
+    }
+
+    val activeTrackColor = if (isExceeding) Color.Red else MaterialTheme.colorScheme.primary
+    val inactiveTrackColor = Color.DarkGray
+
+    Slider(
+        value = safeThreshold,
+        onValueChange = onThresholdChanged,
+        valueRange = safeMin..safeMax,
+        enabled = enabled,
+        thumb = {
+            SliderDefaults.Thumb(
+                interactionSource = remember { MutableInteractionSource() },
+                colors = SliderDefaults.colors(thumbColor = Color.White)
+            )
+        },
+        track = {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(12.dp)
+            ) {
+                val w = size.width
+                val h = size.height
+                val cornerRadius = h / 2f
+
+                // 背景トラック
+                drawRoundRect(
+                    color = inactiveTrackColor,
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerRadius, cornerRadius)
+                )
+
+                // リアルタイム進捗トラック (現在値)
+                if (currentFraction > 0f) {
+                    drawRoundRect(
+                        color = activeTrackColor,
+                        size = androidx.compose.ui.geometry.Size(w * currentFraction, h),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerRadius, cornerRadius)
+                    )
+                }
+
+                // ピークホールド縦線 (オレンジ色の細線)
+                if (enablePeakHold && peakValue > safeMin) {
+                    val peakFraction = if (range > 0f) ((peakValue - safeMin) / range).coerceIn(0f, 1f) else 0f
+                    val peakX = w * peakFraction
+                    drawLine(
+                        color = peakColor,
+                        start = Offset(peakX, 0f),
+                        end = Offset(peakX, h),
+                        strokeWidth = peakStrokeWidth.toPx()
+                    )
+                }
+            }
+        }
+    )
 }
 
 /**

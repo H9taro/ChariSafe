@@ -6,7 +6,13 @@ import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import jp.hisanet.charisafe.data.debug.ApproachDebugLogger
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.nio.ByteBuffer
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class RearApproachDetector(
     private val approachDebugLogger: ApproachDebugLogger? = null,
@@ -20,9 +26,11 @@ class RearApproachDetector(
     companion object {
         private const val TAG = "RearApproachDetector"
         private const val HIGH_BRIGHTNESS_PIXEL_THRESHOLD = 200
-        private const val MAX_NIGHT_LUMINOSITY = 240.0 // テスト用に上限を緩和（屋内照明や街灯下でも動作するように調整）
         private const val REQUIRED_CONSECUTIVE_FRAMES = 4 // 連続成立フレーム数
     }
+
+    private val _approachScoreState = MutableStateFlow(0f)
+    val approachScoreState: StateFlow<Float> = _approachScoreState.asStateFlow()
 
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
 
@@ -74,13 +82,6 @@ class RearApproachDetector(
             val avgLuminosity = if (sampledCount > 0) totalLuminosity.toDouble() / sampledCount else 0.0
             val currentRatio = if (sampledCount > 0) highBrightnessPixelCount.toFloat() / sampledCount else 0f
 
-            // 2. 夜間限定フィルタ (明るい環境や昼間は無視)
-            if (avgLuminosity > MAX_NIGHT_LUMINOSITY) {
-                consecutiveCount = 0
-                imageProxy.close()
-                return
-            }
-
             // 3. 移動平均による平滑化
             ratioHistory[historyIndex] = currentRatio
             historyIndex = (historyIndex + 1) % ratioHistory.size
@@ -94,6 +95,10 @@ class RearApproachDetector(
             val ratioScore = (smoothedRatio * 100f).coerceAtMost(50f) // 最大50点
             val expansionScore = if (expansionRate > 1.2f) ((expansionRate - 1.0f) * 50f).coerceAtMost(50f) else 0f // 最大50点
             val approachScore = ratioScore + expansionScore
+
+            // リアルタイム StateFlow の更新 (I/Fトレーサビリティ)
+            _approachScoreState.value = approachScore
+            Log.d(TAG, "📊 [Trace] approachScore: $approachScore")
 
             // 接近感度スライダー連動 (30%敏感=38.5 〜 100%鈍感=70.0)
             val userSensitivity = getApproachSensitivity().coerceIn(0.3f, 1.0f)
@@ -112,6 +117,11 @@ class RearApproachDetector(
                 dynamicScoreThreshold = dynamicScoreThreshold,
                 consecutiveCount = consecutiveCount,
                 triggered = triggered
+            )
+            val timeStr = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
+            Log.i(
+                "ApproachTrace",
+                "$timeStr\nDetector=$approachScore"
             )
 
             // 5. 連続成立フレーム判定 & スコア判定

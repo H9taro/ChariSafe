@@ -4,6 +4,10 @@ import android.util.Log
 import jp.hisanet.charisafe.data.debug.DecelerationDebugLogger
 import jp.hisanet.charisafe.domain.model.GpxPoint
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
 class SpeedDecelerationDetector(
     private val decelerationDebugLogger: DecelerationDebugLogger? = null,
     private val getTargetDecelerationMs2: () -> Float, // ユーザー設定の減速閾値 (m/s^2, 例: 1.0 〜 4.0)
@@ -15,6 +19,9 @@ class SpeedDecelerationDetector(
         private const val TAG = "SpeedDecelerationDetector"
         private const val ALPHA_EMA = 0.35f // 指数移動平均(EMA)平滑化係数
     }
+
+    private val _decelerationState = MutableStateFlow(0f)
+    val decelerationState: StateFlow<Float> = _decelerationState.asStateFlow()
 
     private var smoothedSpeedMs: Float = -1f
     private var lastTimestampMs: Long = 0L
@@ -41,6 +48,10 @@ class SpeedDecelerationDetector(
         // 2. 減速度の算出 (a = (v_prev - v_curr) / dt  [m/s^2])
         val deceleration = (prevSmoothed - smoothedSpeedMs) / dt
         val thresholdMs2 = getTargetDecelerationMs2().coerceIn(1.0f, 4.0f)
+
+        // リアルタイム StateFlow の更新 (I/Fトレーサビリティ)
+        _decelerationState.value = deceleration.coerceAtLeast(0f)
+        Log.d(TAG, "📊 [Trace] deceleration: ${deceleration.coerceAtLeast(0f)} m/s^2")
 
         // 3. 継続判定（連続2回以上の超過でノイズカット）
         val isExceeding = deceleration >= thresholdMs2

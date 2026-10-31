@@ -6,6 +6,9 @@ import kotlinx.coroutines.flow.StateFlow
 
 interface RecordingRepository {
     val recordingState: StateFlow<RecordingState>
+    val approachScoreState: StateFlow<Float>
+    val gForceState: StateFlow<Float>
+    val soundAmplitudeState: StateFlow<Float>
     fun startRecording(config: AppConfig)
     fun stopRecording()
 }
