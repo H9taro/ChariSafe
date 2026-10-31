@@ -192,8 +192,13 @@ class RecordingService : Service(), LifecycleOwner {
             return START_NOT_STICKY
         }
 
-        // 設定リポジトリの最新値を正としてカメラ選択を確実に同期
-        activeCamera = configRepository.getConfig().activeCamera
+        // インテントまたは設定リポジトリからカメラ選択を確実に同期
+        val camName = intent.getStringExtra(EXTRA_ACTIVE_CAMERA)
+        activeCamera = if (camName != null) {
+            try { ActiveCamera.valueOf(camName) } catch (e: Exception) { configRepository.getConfig().activeCamera }
+        } else {
+            configRepository.getConfig().activeCamera
+        }
         ringBufferMinutes = intent.getIntExtra(EXTRA_RING_BUFFER_MINUTES, 5)
         targetFps = intent.getIntExtra(EXTRA_TARGET_FPS, 10)
         userConfigFps = targetFps

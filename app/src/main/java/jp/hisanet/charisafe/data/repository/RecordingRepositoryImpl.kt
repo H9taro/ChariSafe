@@ -84,6 +84,7 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
     override fun startRecording(config: AppConfig) {
         val startIntent = Intent(context, RecordingService::class.java).apply {
             action = RecordingService.ACTION_START_RECORDING
+            putExtra(RecordingService.EXTRA_ACTIVE_CAMERA, config.activeCamera.name)
             putExtra(RecordingService.EXTRA_TARGET_FPS, config.fps)
             putExtra(RecordingService.EXTRA_RESOLUTION_WIDTH, config.resolution.width)
             putExtra(RecordingService.EXTRA_RESOLUTION_HEIGHT, config.resolution.height)
