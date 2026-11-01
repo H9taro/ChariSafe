@@ -277,8 +277,6 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
         // 2. 感度スライダー 4種 ＆ リアルタイム比較バー
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -304,7 +302,7 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                 // 減速
                 Column {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(text = "減速 ${String.format(Locale.US, "%.1f", uiState.sensitivity.decelerationSensitivity)} m/s²", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "減速 ${String.format(Locale.US, "%.2f", uiState.sensitivity.decelerationSensitivity)} m/s²", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Text(text = "${uiState.sessionEventCounts.decelerationCount}件", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                     ThresholdBar(
@@ -312,7 +310,7 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                         thresholdValue = uiState.sensitivity.decelerationSensitivity,
                         onThresholdChanged = { viewModel.updateSensitivity(uiState.sensitivity.copy(decelerationSensitivity = it)) },
                         minValue = 0f,
-                        maxValue = 5f
+                        maxValue = 2f
                     )
                 }
 
@@ -347,8 +345,6 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                 }
             }
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
 
         // 3. シャッターボタン
         CameraShutterButton(isRecording = isRecording) {

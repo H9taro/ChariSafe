@@ -47,7 +47,7 @@ class SpeedDecelerationDetector(
 
         // 2. 減速度の算出 (a = (v_prev - v_curr) / dt  [m/s^2])
         val deceleration = (prevSmoothed - smoothedSpeedMs) / dt
-        val thresholdMs2 = getTargetDecelerationMs2().coerceIn(1.0f, 4.0f)
+        val thresholdMs2 = getTargetDecelerationMs2()
 
         // リアルタイム StateFlow の更新 (I/Fトレーサビリティ)
         _decelerationState.value = deceleration.coerceAtLeast(0f)
