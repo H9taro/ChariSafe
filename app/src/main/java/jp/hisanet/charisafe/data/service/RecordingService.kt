@@ -23,6 +23,7 @@ import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
@@ -373,10 +374,26 @@ class RecordingService : Service(), LifecycleOwner {
         val provider = cameraProvider ?: return
         provider.unbindAll()
 
+        val currentRes = configRepository.getConfig().resolution
+        resWidth = currentRes.width
+        resHeight = currentRes.height
+
+        val targetQuality = when {
+            resWidth >= 1920 || resHeight >= 1080 -> Quality.FHD
+            resWidth >= 1280 || resHeight >= 720 -> Quality.HD
+            else -> Quality.SD
+        }
+
+        val qualitySelector = QualitySelector.fromOrderedList(
+            listOf(targetQuality, Quality.HD, Quality.SD),
+            FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)
+        )
+
         val recorderBuilder = Recorder.Builder()
-        val qualitySelector = QualitySelector.from(Quality.HD)
         recorderBuilder.setQualitySelector(qualitySelector)
         val recorder = recorderBuilder.build()
+
+        Log.i(TAG, "📹 CameraX 動画解像度設定: targetQuality=$targetQuality ($resWidth x $resHeight)")
 
         val videoCaptureBuilder = VideoCapture.Builder(recorder)
         val camera2Interop = Camera2Interop.Extender(videoCaptureBuilder)

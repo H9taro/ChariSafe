@@ -477,3 +477,25 @@ ChariSafe アプリが内部ストレージ (`files/debug`, `files/logs`, `files
 | **`files/logs/ride_summaries.json`** | ライド（走行セッション）ごとの集計値の永続化 | ライド終了時に生成・保存。 | `StartTimeMs`, `EndTimeMs`, `MovingTimeSec`, `StoppedTimeSec`, `TotalDistanceKm`, `AverageSpeedKmh`, `MaxSpeedKmh`, `EventCounts` |
 | **`files/gpx/ride_yyyyMMdd_HHmmss.gpx`** | 走行軌跡の標準 GPX 形式出力 | 録画開始〜終了まで生成。 | `Latitude`, `Longitude`, `Speed`, `Timestamp` (GPXトラックポイント) |
 | **`files/recordings/seg_yyyyMMdd_HHmmss.mp4`** | ドライブレコーダーの映像データ（リングバッファ/保護） | 1分ごとのローテーション、保護時は recordings/ へ永続コピー。 | H.264 Video + AAC Audio Stream |
+
+---
+
+## 23. 動画解像度動的マッピング仕様 (QualitySelector & FallbackStrategy)
+
+ユーザーが設定画面で選択した動画解像度 (`VideoResolution`: `SD_480P`, `HD_720P`, `FHD_1080P`) を CameraX の `Recorder` へ動的にマッピング・適用する仕様である。
+
+| 設定解像度 (`VideoResolution`) | 要求サイズ (W x H) | CameraX Target Quality | カメラ非対応時の自動フォールバック戦略 (`FallbackStrategy`) |
+|---|---|---|---|
+| **`SD_480P`** | `640 x 480` | `Quality.SD` | `FallbackStrategy.higherQualityOrLowerThan(Quality.SD)` |
+| **`HD_720P`** | `1280 x 720` | `Quality.HD` | `FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)` |
+| **`FHD_1080P`** | `1920 x 1080` | `Quality.FHD` | `FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)` |
+
+> **[注意] 3840x2160 (4K) が使用不可な技術的理由**:
+> ChariSafe は動画撮影 (`VideoCapture`) とリアルタイムアプローチ検知の画像解析 (`ImageAnalysis`) を同一カメラデバイスへ同時バインド（同時起動）します。Android Camera2 / CameraX 規格（`StreamConfigurationMap`）および実機ハードウェア制限 (`INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED`) により、`VideoCapture` と `ImageAnalysis` の同時バインド時における出力ストリームの物理上限は **Full HD (1920x1080)** に制限されます（4Kを指定してもカメラドライバにより 1080P にダウンサイズされます）。そのため、設定選択肢からは 3840x2160 を削除し、実稼働可能な最高解像度を **FHD_1080P (1920x1080)** と規定しています。
+
+### 制御シーケンス
+1. `MainViewModel` から `ConfigRepository` 経由で `VideoResolution` が更新・保存される。
+2. `RecordingRepositoryImpl.startRecording(config)` が `EXTRA_RESOLUTION_WIDTH` および `EXTRA_RESOLUTION_HEIGHT` を起動インテントへ添付する。
+3. `RecordingService` の `setupVideoCaptureAndStart()` 内で `configRepository.getConfig().resolution` から常に最新の幅・高さを直接取得し、対象の `targetQuality`（`FHD` / `HD` / `SD`）を判定する。
+4. `QualitySelector.fromOrderedList(listOf(targetQuality, Quality.HD, Quality.SD), FallbackStrategy...)` を構築し、CameraX `Recorder.Builder` へセットしてカメラバインドを完了する。
+
