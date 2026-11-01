@@ -86,7 +86,7 @@ flowchart TD
     MS <-->|UIState / 操作| VM
     VM <-->|呼び出し| RepoIF
     VM -->|Service起動/バインド| RS
-    RS -->|StateFlow (ServiceState & Realtime Flow)| VM
+    RS -->|StateFlow| VM
 
     RS -->|カメラフレーム| RAD
     RS -->|マイク音声| AID
@@ -133,12 +133,12 @@ flowchart TD
 
 「常時表示（リアルタイムフィードバック）」と「イベント判定（トリガー記録）」の混同を防ぐためのデータ分離設計仕様である。
 
-| 機能種別 | ① リアルタイム StateFlow 値 (生データ) | ② イベント発火閾値 (トリガー条件) | ③ UI 表示値 (`MainUiState`) | ④ イベントログ保存値 (`EventDetectionLog`) |
-|---|---|---|---|---|
-| **接近 (`APPROACH`)** | `approachScoreState`<br>- カメラフレーム毎の接近スコア<br>- 範囲: `0.0 〜 100.0` | **動的スコア閾値**: `25.0 + (感度 * 45.0)`<br>(範囲: 38.5 〜 70.0)<br>＆ 連続4フレーム以上成立 | `currentApproachScore`<br>- 常時画面の接近バー<br>- リアルタイムスコア (`0〜100`) | - `sensitivityValue`: 設定感度生値 (例: `0.7`)<br>- `sensitivityLabel`: `"感度: 70%"` |
-| **減速 (`DECELERATION`)** | `decelerationState`<br>- 現在のリアルタイム減速度<br>- 単位: `m/s²` (0.0〜5.0) | **減速閾値**: `1.0 〜 4.0 m/s²`<br>＆ 連続2回以上超過 | `currentDecelValue`<br>- 常時画面の減速バー<br>- リアルタイム減速度 (`m/s²`) | - `sensitivityValue`: 減速閾値 (例: `1.5`)<br>- `sensitivityLabel`: `"1.5m/s²"` |
-| **衝撃 (`COLLISION`)** | `gForceState`<br>- 3軸合成重力加速度<br>- 単位: `G` (1.0G〜10.0G+) | **衝撃閾値**: `>= 3.0 G`<br>(合成加速度 29.43 m/s² 以上) | `currentGValue`<br>- 常時画面の衝撃バー<br>- リアルタイム合成加速度 (`G`) | - `sensitivityValue`: 衝撃閾値 (例: `3.0`)<br>- `sensitivityLabel`: `"3.0G"` |
-| **音量 (`SOUND`)** | `soundAmplitudeState`<br>- マイク音圧の振幅最大値<br>- 範囲: `0 〜 32767` | **振幅閾値**: `1000 〜 32767`<br>(デフォルト: 5000) | `currentSoundAmplitude`<br>- 常時画面の音量バー<br>- リアルタイム振幅値 (`0〜32767`) | - `sensitivityValue`: 振幅閾値 (例: `5000.0`)<br>- `sensitivityLabel`: `"振幅: 5000"` |
+| 機能種別 | ① リアルタイム StateFlow 値 (生データ) | ② イベント発火閾値 (トリガー条件)                                                              | ③ UI 表示値 (`MainUiState`) | ④ イベントログ保存値 (`EventDetectionLog`) |
+|---|---|------------------------------------------------------------------------------------------------|---|---|
+| **接近 (`APPROACH`)** | `approachScoreState`<br>- カメラフレーム毎の接近スコア<br>- 範囲: `0.0 〜 100.0` | **動的スコア閾値**: `25.0 + (感度 * 45.0)`<br>(範囲: 38.5 〜 70.0)<br>＆ 連続3フレーム以上成立 | `currentApproachScore`<br>- 常時画面の接近バー<br>- リアルタイムスコア (`0〜100`) | - `sensitivityValue`: 設定感度生値 (例: `0.7`)<br>- `sensitivityLabel`: `"感度: 70%"` |
+| **減速 (`DECELERATION`)** | `decelerationState`<br>- 現在のリアルタイム減速度<br>- 単位: `m/s²` (0.0〜5.0) | **減速閾値**: `1.0 〜 4.0 m/s²`<br>＆ 連続2回以上超過                                          | `currentDecelValue`<br>- 常時画面の減速バー<br>- リアルタイム減速度 (`m/s²`) | - `sensitivityValue`: 減速閾値 (例: `1.5`)<br>- `sensitivityLabel`: `"1.5m/s²"` |
+| **衝撃 (`COLLISION`)** | `gForceState`<br>- 3軸合成重力加速度<br>- 単位: `G` (1.0G〜10.0G+) | **衝撃閾値**: `>= 3.0 G`<br>(合成加速度 29.43 m/s² 以上)                                       | `currentGValue`<br>- 常時画面の衝撃バー<br>- リアルタイム合成加速度 (`G`) | - `sensitivityValue`: 衝撃閾値 (例: `3.0`)<br>- `sensitivityLabel`: `"3.0G"` |
+| **音量 (`SOUND`)** | `soundAmplitudeState`<br>- マイク音圧の振幅最大値<br>- 範囲: `0 〜 32767` | **振幅閾値**: `1000 〜 32767`<br>(デフォルト: 5000)                                            | `currentSoundAmplitude`<br>- 常時画面の音量バー<br>- リアルタイム振幅値 (`0〜32767`) | - `sensitivityValue`: 振幅閾値 (例: `5000.0`)<br>- `sensitivityLabel`: `"振幅: 5000"` |
 
 ---
 
@@ -434,12 +434,12 @@ flowchart TD
 
 ## 19. Detector アルゴリズム・入出力・内部パラメータ一覧
 
-| Detector クラス | 入力データ (Input) | 内部アルゴリズム / 判定条件 | 閾値・内部パラメータ | 出力 / コールバック & StateFlow |
-|---|---|---|---|---|
-| **`RearApproachDetector`** | CameraX `ImageProxy`<br>(YUV_420_888) | 中央 ROI (X:30%-70%, Y:40%-80%) 内の高輝度ピクセル比率 & 拡大率から接近スコアを計算。夜間輝度フィルタ適用。 | - 高輝度ピクセル閾値: `>= 200`<br>- 夜間輝度上限: `<= 240.0`<br>- 連続判定数: `>= 4 フレーム`<br>- 動的スコア閾値: `25.0 + (感度 * 45.0)` | - `onApproachDetected`<br>- `approachScoreState: StateFlow<Float>` |
-| **`SpeedDecelerationDetector`** | `GpxPoint`<br>(速度 km/h, 時間 ms) | 速度を m/s に換算後、EMA平滑化 (α=0.35)。時間差分から減速度 `(v_prev - v_curr) / dt` [m/s²] を計算。 | - 平滑化係数: `0.35`<br>- 減速閾値: `1.0 〜 4.0 m/s²`<br>- 連続超過数: `>= 2 回` | - `onDecelerationDetected`<br>- `decelerationState: StateFlow<Float>` |
-| **`CollisionDropDetector`** | 加速度 `SensorEvent`<br>(TYPE_ACCELEROMETER) | 3軸合成加速度 `sqrt(x²+y²+z²)` を計算し重力加速度 (9.81 m/s²) で割って G換算。 | - 衝撃判定閾値: `>= 3.0 G`<br>- 重力加速度: `9.81 m/s²` | - `onCollisionOrDropDetected`<br>- `gForceState: StateFlow<Float>` |
-| **`AudioImpactDetector`** | マイク PCM 16bit 音声<br>(`AudioRecord`, 8kHz) | ShortArrayバッファの振幅絶対値の最大値 `maxAmplitude` を検出。接近警告音鳴動中はミュート。 | - サンプリングレート: `8000 Hz`<br>- 設定振幅閾値: `1000 〜 32767`<br>- 一時ミュートフラグ: `isMuted` | - `onLoudSoundDetected`<br>- `soundAmplitudeState: StateFlow<Float>` |
+| Detector クラス | 入力データ (Input) | 内部アルゴリズム / 判定条件                                                                                                             | 閾値・内部パラメータ                                                                               | 出力 / コールバック & StateFlow |
+|---|---|-----------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|---|
+| **`RearApproachDetector`** | CameraX `ImageProxy`<br>(YUV_420_888) | 高輝度ピクセル抽出 (`currentRatio`, `smoothedRatio`, `expansionRate`) と暗さ係数 (`darkness`) を掛け合わせた接近スコア計算。 | - 高輝度ピクセル値: `>= 0xFF` (255)<br>- 移動平均ウィンドウ: `3 フレーム`<br>- 接近感度スライダー範囲: `0 〜 20`<br>- クールダウン: `300 フレーム` | - `onApproachDetected`<br>- `approachScoreState: StateFlow<Float>` |
+| **`SpeedDecelerationDetector`** | `GpxPoint`<br>(速度 km/h, 時間 ms) | 速度を m/s に換算後、EMA平滑化 (α=0.35)。時間差分から減速度 `(v_prev - v_curr) / dt` [m/s²] を計算。                                    | - 平滑化係数: `0.35`<br>- 減速閾値: `1.0 〜 4.0 m/s²`<br>- 連続超過数: `>= 2 回`                   | - `onDecelerationDetected`<br>- `decelerationState: StateFlow<Float>` |
+| **`CollisionDropDetector`** | 加速度 `SensorEvent`<br>(TYPE_ACCELEROMETER) | 3軸合成加速度 `sqrt(x²+y²+z²)` を計算し重力加速度 (9.81 m/s²) で割って G換算。                                                          | - 衝撃判定閾値: `>= 3.0 G` (通常走行時は3.5G~4.0G調整可)<br>- 重力加速度: `9.81 m/s²`              | - `onCollisionOrDropDetected`<br>- `gForceState: StateFlow<Float>` |
+| **`AudioStats (CameraX)`** | 録画中の音声ストリーム<br>(`VideoRecordEvent.Status`) | CameraX 1.4.1 の `recordingStats.audioStats.audioAmplitude` から正規化振幅 (`0.0 〜 1.0`) を直接取得。旧 `AudioImpactDetector` は廃止。 | - 振幅レンジ: `0.0 〜 1.0`<br>- サンプルレート: 48kHz (CameraX 準拠)                               | - `soundAmplitudeState: StateFlow<Float>` (RecordingService 経由) |
 
 ---
 
