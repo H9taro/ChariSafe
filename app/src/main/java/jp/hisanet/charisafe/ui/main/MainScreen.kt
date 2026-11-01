@@ -599,15 +599,10 @@ fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState:
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    val cleanSensitivity = det.sensitivityLabel
-                                        .replace("感度:", "")
-                                        .replace("振幅:", "")
-                                        .replace("G:", "")
-                                        .replace("減速:", "")
-                                        .trim()
+                                    val sensitivity = det.sensitivityLabel
                                     val speedStr = String.format(Locale.US, "%.1f km/h", det.speedKmh)
                                     val timeStr = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(det.timestampMs))
-                                    val displayText = "${det.eventType.emoji} ${det.eventType.displayName}  $timeStr  |  $cleanSensitivity  |  $speedStr"
+                                    val displayText = "${det.eventType.emoji} ${det.eventType.displayName}  $timeStr  |  $sensitivity  |  $speedStr"
 
                                     Text(
                                         text = displayText,

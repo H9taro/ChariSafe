@@ -123,7 +123,7 @@ flowchart TD
 | `gForce` | `Float` | G | 約20ms毎 | `CollisionDropDetector` | 3軸合成加速度 (`gForceState`)。衝撃リアルタイム表示および閾値判定に使用。 |
 | `maxAmplitude` | `Int` | 振幅 | PCM読込毎 | `AudioImpactDetector` | マイク音圧振幅リアルタイム値 (`soundAmplitudeState`)。音量リアルタイム表示および閾値判定に使用。 |
 | `activeCamera` | `Enum` | - | 設定変更時 | `AppConfig` | 使用カメラ (`REAR` / `FRONT`)。設定値に従ってカメラバインドを切り替えること。 |
-| `EventDetectionLog` | `Class` | - | イベント成立時 | `EventLogRepositoryImpl` | 発生した検知イベントログ。連打・重複発生を防止するクールダウン制御を設けること。 |
+| `EventDetectionLog` | `Class` | - | イベント成立時 | `EventLogRepositoryImpl` | 発生した検知イベントログ。 |
 | `IncidentLog` | `Class` | - | イベント確定時 | `EventLogRepositoryImpl` | 動画と紐付いたインシデント保護ログ。 |
 | `RingBuffer Segment` | `.mp4` | ファイル | 1分毎 | `RingBufferManager` | 循環録画される1分単位のローテーション動画ファイル (`seg_YYYYMMDD_HHmmss.mp4`)。 |
 
@@ -436,7 +436,7 @@ flowchart TD
 
 | Detector クラス | 入力データ (Input) | 内部アルゴリズム / 判定条件                                                                                                             | 閾値・内部パラメータ                                                                               | 出力 / コールバック & StateFlow |
 |---|---|-----------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|---|
-| **`RearApproachDetector`** | CameraX `ImageProxy`<br>(YUV_420_888) | 高輝度ピクセル抽出 (`currentRatio`, `smoothedRatio`, `expansionRate`) と暗さ係数 (`darkness`) を掛け合わせた接近スコア計算。 | - 高輝度ピクセル値: `>= 0xFF` (255)<br>- 移動平均ウィンドウ: `3 フレーム`<br>- 接近感度スライダー範囲: `0 〜 20`<br>- クールダウン: `300 フレーム` | - `onApproachDetected`<br>- `approachScoreState: StateFlow<Float>` |
+| **`RearApproachDetector`** | CameraX `ImageProxy`<br>(YUV_420_888) | 高輝度ピクセル抽出 (`currentRatio`, `smoothedRatio`, `expansionRate`) と暗さ係数 (`darkness`) を掛け合わせた接近スコア計算。 | - 高輝度ピクセル値: `>= 0xFF` (255)<br>- 移動平均ウィンドウ: `3 フレーム`<br>- 接近感度スライダー範囲: `0 〜 20`<br>-  | - `onApproachDetected`<br>- `approachScoreState: StateFlow<Float>` |
 | **`SpeedDecelerationDetector`** | `GpxPoint`<br>(速度 km/h, 時間 ms) | 速度を m/s に換算後、EMA平滑化 (α=0.35)。時間差分から減速度 `(v_prev - v_curr) / dt` [m/s²] を計算。                                    | - 平滑化係数: `0.35`<br>- 減速閾値: `1.0 〜 4.0 m/s²`<br>- 連続超過数: `>= 2 回`                   | - `onDecelerationDetected`<br>- `decelerationState: StateFlow<Float>` |
 | **`CollisionDropDetector`** | 加速度 `SensorEvent`<br>(TYPE_ACCELEROMETER) | 3軸合成加速度 `sqrt(x²+y²+z²)` を計算し重力加速度 (9.81 m/s²) で割って G換算。                                                          | - 衝撃判定閾値: `>= 3.0 G` (通常走行時は3.5G~4.0G調整可)<br>- 重力加速度: `9.81 m/s²`              | - `onCollisionOrDropDetected`<br>- `gForceState: StateFlow<Float>` |
 | **`AudioStats (CameraX)`** | 録画中の音声ストリーム<br>(`VideoRecordEvent.Status`) | CameraX 1.4.1 の `recordingStats.audioStats.audioAmplitude` から正規化振幅 (`0.0 〜 1.0`) を直接取得。旧 `AudioImpactDetector` は廃止。 | - 振幅レンジ: `0.0 〜 1.0`<br>- サンプルレート: 48kHz (CameraX 準拠)                               | - `soundAmplitudeState: StateFlow<Float>` (RecordingService 経由) |

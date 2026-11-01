@@ -194,7 +194,7 @@ class RecordingService : Service(), LifecycleOwner {
             handleDetectedEvent(
                 EventType.COLLISION,
                 sens,
-                "G: ${String.format(Locale.US, "%.1f", sens)}G"
+                "${String.format(Locale.US, "%.1f", sens)}${EventType.COLLISION.unitName}"
             )
         }
     }
@@ -398,7 +398,8 @@ class RecordingService : Service(), LifecycleOwner {
         }) {
             val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
             val sens = prefs.getFloat("key_approach_sensitivity", 100f)
-            handleDetectedEvent(EventType.APPROACH, sens, "感度: ${sens}")
+            val sensString = String.format(Locale.US, "%.1f", sens)
+            handleDetectedEvent(EventType.APPROACH, sens, "${sensString}${EventType.APPROACH.unitName}")
         }
         rearApproachDetector = detector
         approachCollectJob?.cancel()
@@ -481,14 +482,9 @@ class RecordingService : Service(), LifecycleOwner {
             EventType.APPROACH -> prefs.getFloat("key_approach_sensitivity", 0.7f)
             EventType.DECELERATION -> prefs.getFloat("key_decel_sensitivity", 1.5f)
             EventType.COLLISION -> prefs.getFloat("key_collision_sensitivity", 3.0f)
-            EventType.SOUND -> prefs.getFloat("key_sound_sensitivity", 5000.0f)
+            EventType.SOUND -> (prefs.getFloat("key_sound_sensitivity", 5000.0f)) / 50f
         }
-        val label = when (eventType) {
-            EventType.APPROACH -> "感度: ${sens}"
-            EventType.DECELERATION -> "減速: ${sens}秒"
-            EventType.COLLISION -> "G: ${sens}G"
-            EventType.SOUND -> "振幅: ${((sens / 2.0f) * 100).toInt()}%"
-        }
+        val label = "${sens}${eventType.unitName}"
         handleDetectedEvent(eventType, sens, label)
     }
 
@@ -518,8 +514,7 @@ class RecordingService : Service(), LifecycleOwner {
             latitude = lat,
             longitude = lon,
             sensitivityValue = sensitivityValue,
-            sensitivityLabel = sensitivityLabel,
-            sensitivitySnapshot = snapshot
+            sensitivityLabel = sensitivityLabel
         )
 
         val existingDetections = EventDetectionLogStore.loadLogs(this).toMutableList()
@@ -789,7 +784,7 @@ class RecordingService : Service(), LifecycleOwner {
                         handleDetectedEvent(
                             EventType.SOUND,
                             audioAmp,
-                            "振幅: ${((audioAmp / 1.5f) * 100).toInt()}%"
+                            "${((audioAmp / 1.5f) * 100).toInt()}${EventType.SOUND.unitName}"
                         )
                     }
                 }

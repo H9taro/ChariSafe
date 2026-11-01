@@ -2,11 +2,11 @@ package jp.hisanet.charisafe.domain.model
 
 import java.util.UUID
 
-enum class EventType(val displayName: String, val emoji: String) {
-    DECELERATION("減速", "⚠"),
-    APPROACH("接近", "🚗"),
-    COLLISION("衝撃", "💥"),
-    SOUND("音量", "🔊")
+enum class EventType(val displayName: String, val emoji: String, val unitName: String) {
+    APPROACH("接近", "🚗",""),
+    DECELERATION("減速", "⚠","km/s²"),
+    COLLISION("衝撃", "💥","G"),
+    SOUND("音量", "🔊","%")
 }
 
 data class EventDetectionLog(
@@ -17,8 +17,7 @@ data class EventDetectionLog(
     val latitude: Double,
     val longitude: Double,
     val sensitivityValue: Float,           // 生数値
-    val sensitivityLabel: String,          // フォーマット済み表示文字列 ("感度: 70%", "1.5秒", "3.0G", "振幅: 5000")
-    val sensitivitySnapshot: EventSensitivity = EventSensitivity(),
+    val sensitivityLabel: String,          // フォーマット済み表示文字列 ("感度: 7", "1.5秒", "3.0G", "振幅: 50%")
     var incidentId: String? = null,        // 紐付けられた IncidentLog ID
     var segmentName: String = ""           // 発生時に録画中だったセグメント名 (例: seg_002.mp4)
 )

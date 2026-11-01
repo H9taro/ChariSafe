@@ -99,14 +99,14 @@ class RearApproachDetector(
             val darkness = (1.0 - luminosityRatio)
             val approachScore = (expansionRate * darkness * darkness).toFloat()
 
-            // リアルタイム StateFlow の更新 (I/Fトレーサビリティ)
-            _approachScoreState.value = approachScore
-            Log.d(TAG, "📊 [Trace] approachScore: $approachScore")
-
             // 接近感度スライダー連動
             val userSensitivity = getApproachSensitivity()
 
             var triggered = false
+
+            // リアルタイム StateFlow の更新 (I/Fトレーサビリティ)
+            _approachScoreState.value = approachScore
+            Log.d(TAG, "📊 [Trace] approachScore: $approachScore (Th: $userSensitivity)")
 
             // 5. スコア & 連続成立フレーム判定
             if (approachScore >= userSensitivity && frameCounter-- <= 0) {
@@ -115,7 +115,7 @@ class RearApproachDetector(
                     "🚨 後方車両接近検知! Score: $approachScore (Th: $userSensitivity), AvgLum: $luminosityRatio"
                 )
                 triggered = true
-                frameCounter = 300
+                frameCounter = REQUIRED_CONSECUTIVE_FRAMES
                 toneGenerator.startTone(ToneGenerator.TONE_DTMF_S, 600)
                 onApproachDetected()
             }

@@ -79,7 +79,6 @@ object EventDetectionLogStore {
                     longitude = obj.optDouble("longitude", LocationTracker.lastValidLongitude),
                     sensitivityValue = obj.optDouble("sensitivityValue", 0.7).toFloat(),
                     sensitivityLabel = obj.optString("sensitivityLabel", ""),
-                    sensitivitySnapshot = EventSensitivity(),
                     incidentId = obj.optString("incidentId", "").takeIf { it.isNotEmpty() }
                 )
                 list.add(log)

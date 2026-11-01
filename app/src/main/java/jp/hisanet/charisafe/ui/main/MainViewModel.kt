@@ -302,8 +302,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 latitude = lat,
                 longitude = lon,
                 sensitivityValue = sens,
-                sensitivityLabel = "減速: ${sens}秒",
-                sensitivitySnapshot = _sensitivity.value
+                sensitivityLabel = "${EventType.DECELERATION.displayName}: ${sens}${EventType.DECELERATION.unitName}"
             )
             eventLogRepository.addDetectionLog(detectionLog)
             loadExistingEvents()
