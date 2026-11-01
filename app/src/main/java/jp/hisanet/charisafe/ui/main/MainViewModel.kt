@@ -21,6 +21,7 @@ import jp.hisanet.charisafe.domain.model.EventCountSummary
 import jp.hisanet.charisafe.domain.model.EventDetectionLog
 import jp.hisanet.charisafe.domain.model.EventSensitivity
 import jp.hisanet.charisafe.domain.model.EventType
+import jp.hisanet.charisafe.domain.model.GpxPoint
 import jp.hisanet.charisafe.domain.model.IncidentLog
 import jp.hisanet.charisafe.domain.model.RecordingState
 import jp.hisanet.charisafe.domain.model.RideSummary
@@ -321,6 +322,121 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setScreen(screen: Screen) {
         _currentScreen.value = screen
+        if (screen == Screen.RIDE_SUMMARY) {
+            syncAndRecalculateRideSummaries()
+        }
+    }
+
+    private fun syncAndRecalculateRideSummaries() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val context = getApplication<Application>()
+                val gpxDir = jp.hisanet.charisafe.util.FileUtils.getGpxDir(context)
+                if (!gpxDir.exists()) return@launch
+
+                val gpxFiles = gpxDir.listFiles { _, name -> name.endsWith(".gpx") }?.sortedBy { it.lastModified() } ?: return@launch
+                val currentSummaries = RideSummaryStore.loadSummaries(context).toMutableList()
+                val detections = jp.hisanet.charisafe.data.local.EventDetectionLogStore.loadLogs(context)
+                val activeGpxPath = gpxRepository.getActiveGpxFilePath()
+
+                var updated = false
+
+                for (file in gpxFiles) {
+                    val fileName = file.name
+                    val existingIndex = currentSummaries.indexOfFirst { it.gpxFileName == fileName }
+                    val existing = if (existingIndex >= 0) currentSummaries[existingIndex] else null
+
+                    if (existing != null && existing.isCompleted) {
+                        continue
+                    }
+
+                    val points = readGpxPoints(file)
+                    if (points.isEmpty()) continue
+
+                    val startTimeMs = points[0].timestampMs
+                    val lastPointTime = points[points.size - 1].timestampMs
+
+                    var totalDist = 0.0
+                    var maxSpd = 0f
+                    var speedSum = 0f
+                    var speedCount = 0
+                    var movingSec = 0L
+                    var stoppedSec = 0L
+
+                    for (i in 1 until points.size) {
+                        val p1 = points[i - 1]
+                        val p2 = points[i]
+                        val dist = calculateHaversineDistance(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
+                        totalDist += dist
+                        if (p2.speedKmh > maxSpd) maxSpd = p2.speedKmh
+                        speedSum += p2.speedKmh
+                        speedCount++
+
+                        val dt = (p2.timestampMs - p1.timestampMs) / 1000L
+                        if (dt in 1..60) {
+                            if (p2.speedKmh >= 1.0f) movingSec += dt else stoppedSec += dt
+                        }
+                    }
+
+                    val avgSpd = if (speedCount > 0) speedSum / speedCount else 0f
+                    val endTimeMs = lastPointTime
+                    val totalDurationSec = if (startTimeMs > 0) (endTimeMs - startTimeMs) / 1000L else 0L
+                    val hours = if (totalDurationSec > 0) totalDurationSec / 3600.0 else 1.0
+
+                    val rideDetections = detections.filter { it.timestampMs in startTimeMs..endTimeMs }
+                    val counts = EventCountSummary(
+                        approachCount = rideDetections.count { it.eventType == EventType.APPROACH },
+                        decelerationCount = rideDetections.count { it.eventType == EventType.DECELERATION },
+                        collisionCount = rideDetections.count { it.eventType == EventType.COLLISION },
+                        soundCount = rideDetections.count { it.eventType == EventType.SOUND }
+                    )
+
+                    val isRecordingNow = recordingRepository.recordingState.value == RecordingState.RECORDING
+                    val isThisActive = activeGpxPath?.let { File(it).absolutePath == file.absolutePath } == true
+                    val isCompleted = !(isRecordingNow && isThisActive)
+
+                    val summary = RideSummary(
+                        id = existing?.id ?: java.util.UUID.randomUUID().toString(),
+                        gpxFileName = fileName,
+                        isCompleted = isCompleted,
+                        lastAggregatedTimestampMs = endTimeMs,
+                        startTimeMs = startTimeMs,
+                        endTimeMs = endTimeMs,
+                        movingTimeSec = movingSec,
+                        stoppedTimeSec = stoppedSec,
+                        totalDistanceKm = totalDist,
+                        averageSpeedKmh = avgSpd,
+                        maxSpeedKmh = maxSpd,
+                        eventCounts = counts,
+                        decelerationPerKm = if (totalDist > 0.0) counts.decelerationCount.toFloat() / totalDist.toFloat() else 0f,
+                        decelerationPerHour = (counts.decelerationCount.toFloat() / hours).toFloat(),
+                        approachPerKm = if (totalDist > 0.0) counts.approachCount.toFloat() / totalDist.toFloat() else 0f,
+                        approachPerHour = (counts.approachCount.toFloat() / hours).toFloat(),
+                        collisionPerKm = if (totalDist > 0.0) counts.collisionCount.toFloat() / totalDist.toFloat() else 0f,
+                        collisionPerHour = (counts.collisionCount.toFloat() / hours).toFloat(),
+                        soundPerKm = if (totalDist > 0.0) counts.soundCount.toFloat() / totalDist.toFloat() else 0f,
+                        soundPerHour = (counts.soundCount.toFloat() / hours).toFloat()
+                    )
+
+                    if (existingIndex >= 0) {
+                        currentSummaries[existingIndex] = summary
+                    } else {
+                        currentSummaries.add(0, summary)
+                    }
+                    updated = true
+                }
+
+                if (updated) {
+                    val sorted = currentSummaries.sortedByDescending { it.startTimeMs }
+                    RideSummaryStore.saveSummaries(context, sorted)
+                    withContext(Dispatchers.Main) {
+                        _rideSummaries.value = sorted
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Failed to sync ride summaries", e)
+            }
+        }
     }
 
     fun setTargetEventIdToHighlight(eventId: String?) {
@@ -545,6 +661,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    private fun readGpxPoints(file: File): List<GpxPoint> {
+        val points = mutableListOf<GpxPoint>()
+        try {
+            if (!file.exists()) return points
+            val dbf = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+            val db = dbf.newDocumentBuilder()
+            val doc = db.parse(file)
+            val trkpts = doc.getElementsByTagName("trkpt")
+            for (i in 0 until trkpts.length) {
+                val node = trkpts.item(i)
+                if (node.nodeType == org.w3c.dom.Node.ELEMENT_NODE) {
+                    val element = node as org.w3c.dom.Element
+                    val lat = element.getAttribute("lat").toDoubleOrNull() ?: 0.0
+                    val lon = element.getAttribute("lon").toDoubleOrNull() ?: 0.0
+                    var speedKmh = 0f
+                    var timeMs = 0L
+
+                    val speedElem = element.getElementsByTagName("speed").item(0)
+                    if (speedElem != null) {
+                        speedKmh = speedElem.textContent.toFloatOrNull() ?: 0f
+                    }
+                    val timeElem = element.getElementsByTagName("time").item(0)
+                    if (timeElem != null) {
+                        val timeStr = timeElem.textContent
+                        try {
+                            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+                            sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                            timeMs = sdf.parse(timeStr)?.time ?: 0L
+                        } catch (_: Exception) {
+                            timeMs = file.lastModified()
+                        }
+                    }
+                    if (timeMs <= 0L) timeMs = file.lastModified()
+                    points.add(GpxPoint(latitude = lat, longitude = lon, speedKmh = speedKmh, timestampMs = timeMs))
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("MainViewModel", "Failed to parse GPX file: ${file.name}", e)
+        }
+        return points
     }
 
     fun updateResolution(resolution: VideoResolution) {

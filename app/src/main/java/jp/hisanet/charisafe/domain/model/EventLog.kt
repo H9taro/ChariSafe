@@ -58,6 +58,10 @@ data class EventSensitivity(
 )
 
 data class RideSummary(
+    val id: String = UUID.randomUUID().toString(),
+    val gpxFileName: String = "",
+    val isCompleted: Boolean = false,
+    val lastAggregatedTimestampMs: Long = 0L,
     val startTimeMs: Long,
     val endTimeMs: Long,
     val movingTimeSec: Long,
