@@ -15,15 +15,12 @@ class ApproachDebugLogger(private val context: Context) {
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", Locale.US)
 
     fun log(
-        avgLuminosity: Double,
+        luminosityRatio: Double,
         currentRatio: Float,
         smoothedRatio: Float,
         expansionRate: Float,
-        ratioScore: Float,
-        expansionScore: Float,
         approachScore: Float,
-        dynamicScoreThreshold: Float,
-        consecutiveCount: Int,
+        approachSensitivity: Float,
         triggered: Boolean,
         eventLogId: String = ""
     ) {
@@ -31,9 +28,9 @@ class ApproachDebugLogger(private val context: Context) {
         val isEnabled = prefs.getBoolean("key_approach_csv_enabled", false)
         if (!isEnabled) return
 
-        if (approachScore > 0f || consecutiveCount > 0 || triggered) {
+        if (approachScore > 0f || triggered) {
             val timestamp = dateFormat.format(Date())
-            val row = "$timestamp,$avgLuminosity,$currentRatio,$smoothedRatio,$expansionRate,$ratioScore,$expansionScore,$approachScore,$dynamicScoreThreshold,$consecutiveCount,$triggered,$eventLogId"
+            val row = "$timestamp,$luminosityRatio,$currentRatio,$smoothedRatio,$expansionRate,$approachScore,$approachSensitivity,$triggered,$eventLogId"
             csvLogger.appendRow(row)
         }
     }

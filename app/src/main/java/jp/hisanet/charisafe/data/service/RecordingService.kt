@@ -11,9 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.hardware.camera2.CaptureRequest
-import android.media.AudioManager
 import android.media.MediaScannerConnection
-import android.media.ToneGenerator
 import android.os.Binder
 import android.os.IBinder
 import android.os.PowerManager
@@ -30,8 +28,8 @@ import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
 import androidx.camera.video.Recorder
 import androidx.camera.video.Recording
-import androidx.camera.video.VideoRecordEvent
 import androidx.camera.video.VideoCapture
+import androidx.camera.video.VideoRecordEvent
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -52,7 +50,16 @@ import jp.hisanet.charisafe.data.local.IncidentLogStore
 import jp.hisanet.charisafe.data.local.ringbuffer.RingBufferManager
 import jp.hisanet.charisafe.data.location.LocationTracker
 import jp.hisanet.charisafe.data.sensor.CollisionDropDetector
-import jp.hisanet.charisafe.domain.model.*
+import jp.hisanet.charisafe.domain.model.ActiveCamera
+import jp.hisanet.charisafe.domain.model.EventDetectionLog
+import jp.hisanet.charisafe.domain.model.EventSensitivity
+import jp.hisanet.charisafe.domain.model.EventType
+import jp.hisanet.charisafe.domain.model.IncidentLog
+import jp.hisanet.charisafe.domain.model.IncidentStatus
+import jp.hisanet.charisafe.domain.model.ProtectionFailureReason
+import jp.hisanet.charisafe.domain.model.ProtectionReason
+import jp.hisanet.charisafe.domain.model.RecordingSegment
+import jp.hisanet.charisafe.domain.model.SegmentProtectionTraceEntry
 import jp.hisanet.charisafe.domain.repository.ConfigRepository
 import jp.hisanet.charisafe.util.FileUtils
 import kotlinx.coroutines.CancellableContinuation
@@ -67,15 +74,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.coroutines.resume
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
+import kotlin.coroutines.resume
+
+private const val RING_BUFFER_INTERVAL_MS = 60_000L
 
 class RecordingService : Service(), LifecycleOwner {
     private lateinit var traceLogger: TraceLogger
+
     companion object {
         private const val TAG = "RecordingService"
         private const val CHANNEL_ID = "charisafe_recording_channel"
@@ -130,9 +140,9 @@ class RecordingService : Service(), LifecycleOwner {
     private var recordingStopContinuation: CancellableContinuation<Unit>? = null
     private var statusEventCount = 0
 
-    private val activeSegments = java.util.Collections.synchronizedMap(mutableMapOf<String, RecordingSegment>())
+    private val activeSegments =
+        java.util.Collections.synchronizedMap(mutableMapOf<String, RecordingSegment>())
 
-    private val eventCoordinator = EventCoordinator()
     private val configRepository: ConfigRepository by lazy { ConfigRepositoryImpl(this) }
 
     private var activeCamera: ActiveCamera = ActiveCamera.REAR
@@ -146,7 +156,6 @@ class RecordingService : Service(), LifecycleOwner {
     private var rotationJob: Job? = null
 
     private val analysisExecutor = Executors.newSingleThreadExecutor()
-    private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
 
     private val _serviceState = MutableStateFlow(ServiceState())
 
@@ -157,7 +166,8 @@ class RecordingService : Service(), LifecycleOwner {
         var highestSeverityType: EventType
     )
 
-    private val activeIncidentWindows = java.util.Collections.synchronizedMap(mutableMapOf<String, IncidentWindow>())
+    private val activeIncidentWindows =
+        java.util.Collections.synchronizedMap(mutableMapOf<String, IncidentWindow>())
 
     inner class LocalBinder : Binder() {
         fun getService(): RecordingService = this@RecordingService
@@ -181,7 +191,11 @@ class RecordingService : Service(), LifecycleOwner {
         collisionDropDetector = CollisionDropDetector(this, collisionDebugLogger) {
             val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
             val sens = prefs.getFloat("key_collision_sensitivity", 3.0f)
-            handleDetectedEvent(EventType.COLLISION, sens, "G: ${String.format(Locale.US, "%.1f", sens)}G")
+            handleDetectedEvent(
+                EventType.COLLISION,
+                sens,
+                "G: ${String.format(Locale.US, "%.1f", sens)}G"
+            )
         }
     }
 
@@ -195,7 +209,11 @@ class RecordingService : Service(), LifecycleOwner {
         // インテントまたは設定リポジトリからカメラ選択を確実に同期
         val camName = intent.getStringExtra(EXTRA_ACTIVE_CAMERA)
         activeCamera = if (camName != null) {
-            try { ActiveCamera.valueOf(camName) } catch (e: Exception) { configRepository.getConfig().activeCamera }
+            try {
+                ActiveCamera.valueOf(camName)
+            } catch (e: Exception) {
+                configRepository.getConfig().activeCamera
+            }
         } else {
             configRepository.getConfig().activeCamera
         }
@@ -208,7 +226,10 @@ class RecordingService : Service(), LifecycleOwner {
 
         ringBufferManager = RingBufferManager(this, ringBufferMinutes)
 
-        Log.i(TAG, "onStartCommand action: $action, camera: $activeCamera, ringBufferMinutes: $ringBufferMinutes")
+        Log.i(
+            TAG,
+            "onStartCommand action: $action, camera: $activeCamera, ringBufferMinutes: $ringBufferMinutes"
+        )
 
         when (action) {
             ACTION_START_RECORDING -> {
@@ -219,6 +240,7 @@ class RecordingService : Service(), LifecycleOwner {
                 startRecordingPipeline()
                 startSegmentRotationTimer()
             }
+
             ACTION_STOP_RECORDING -> {
                 collisionDropDetector?.stopListening()
                 serviceScope.launch {
@@ -238,9 +260,12 @@ class RecordingService : Service(), LifecycleOwner {
         rotationJob?.cancel()
         rotationJob = serviceScope.launch(Dispatchers.IO) {
             while (true) {
-                delay(60_000L) // 60秒 (1分) ごとにセグメント切替
+                delay(RING_BUFFER_INTERVAL_MS) // セグメント切替間隔
                 if (_serviceState.value.isRecording) {
-                    Log.i(TAG, "⏱️ 1分経過したため、リングバッファセグメントを自動ローテーション（切替）します")
+                    Log.i(
+                        TAG,
+                        "⏱️ ${RING_BUFFER_INTERVAL_MS}ミリ秒経過したため、リングバッファセグメントを自動ローテーション（切替）します"
+                    )
                     withContext(Dispatchers.Main) {
                         activeRecording?.stop()
                         activeRecording = null
@@ -369,18 +394,18 @@ class RecordingService : Service(), LifecycleOwner {
 
         val detector = RearApproachDetector(approachDebugLogger, {
             val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
-            prefs.getFloat("key_approach_sensitivity", 0.7f)
+            prefs.getFloat("key_approach_sensitivity", 100f)
         }) {
             val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
-            val sens = prefs.getFloat("key_approach_sensitivity", 0.7f)
-            handleDetectedEvent(EventType.APPROACH, sens, "感度: ${(sens * 100).toInt()}%")
+            val sens = prefs.getFloat("key_approach_sensitivity", 100f)
+            handleDetectedEvent(EventType.APPROACH, sens, "感度: ${sens}")
         }
         rearApproachDetector = detector
         approachCollectJob?.cancel()
         approachCollectJob = serviceScope.launch {
             detector.approachScoreState.collect { score ->
-                _approachScoreState.value = score
-                traceLogger.log(TraceMetric.APPROACH, TraceLayer.SERVICE, score)
+                _approachScoreState.value = score.toFloat()
+                traceLogger.log(TraceMetric.APPROACH, TraceLayer.SERVICE, score.toFloat())
                 val timeStr = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
                 Log.i("ApproachTrace", "$timeStr\nService=$score")
             }
@@ -403,7 +428,10 @@ class RecordingService : Service(), LifecycleOwner {
                 videoCapture,
                 imageAnalysis
             )
-            Log.i(TAG, "Bound CameraX VideoCapture + Analyzer ($activeCamera) at targetFps=$targetFps")
+            Log.i(
+                TAG,
+                "Bound CameraX VideoCapture + Analyzer ($activeCamera) at targetFps=$targetFps"
+            )
             startVideoFileOutput()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to bind VideoCapture use case", e)
@@ -426,7 +454,11 @@ class RecordingService : Service(), LifecycleOwner {
         )
 
         val pendingRecording = capture.output.prepareRecording(this, outputOptions)
-        if (audioEnabled && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+        if (audioEnabled && ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
             @SuppressLint("MissingPermission")
             pendingRecording.withAudioEnabled()
         }
@@ -446,21 +478,25 @@ class RecordingService : Service(), LifecycleOwner {
         }
         val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
         val sens = when (eventType) {
-            EventType.DECELERATION -> prefs.getFloat("key_decel_sensitivity", 1.5f)
             EventType.APPROACH -> prefs.getFloat("key_approach_sensitivity", 0.7f)
+            EventType.DECELERATION -> prefs.getFloat("key_decel_sensitivity", 1.5f)
             EventType.COLLISION -> prefs.getFloat("key_collision_sensitivity", 3.0f)
             EventType.SOUND -> prefs.getFloat("key_sound_sensitivity", 5000.0f)
         }
         val label = when (eventType) {
+            EventType.APPROACH -> "感度: ${sens}"
             EventType.DECELERATION -> "減速: ${sens}秒"
-            EventType.APPROACH -> "感度: ${(sens * 100).toInt()}%"
             EventType.COLLISION -> "G: ${sens}G"
             EventType.SOUND -> "振幅: ${((sens / 2.0f) * 100).toInt()}%"
         }
         handleDetectedEvent(eventType, sens, label)
     }
 
-    fun handleDetectedEvent(eventType: EventType, sensitivityValue: Float, sensitivityLabel: String) {
+    fun handleDetectedEvent(
+        eventType: EventType,
+        sensitivityValue: Float,
+        sensitivityLabel: String
+    ) {
         val now = System.currentTimeMillis()
         if (now - recordingStartTimeMs < 3000L) return
 
@@ -469,8 +505,8 @@ class RecordingService : Service(), LifecycleOwner {
         val speedKmh = LocationTracker.lastValidSpeedKmh
         val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
         val snapshot = EventSensitivity(
-            decelerationSensitivity = prefs.getFloat("key_decel_sensitivity", 1.5f),
             approachSensitivity = prefs.getFloat("key_approach_sensitivity", 0.7f),
+            decelerationSensitivity = prefs.getFloat("key_decel_sensitivity", 1.5f),
             collisionSensitivity = prefs.getFloat("key_collision_sensitivity", 3.0f),
             soundSensitivity = prefs.getFloat("key_sound_sensitivity", 0.7f)
         )
@@ -491,21 +527,7 @@ class RecordingService : Service(), LifecycleOwner {
         EventDetectionLogStore.saveLogs(this, existingDetections)
 
         serviceScope.launch(Dispatchers.IO) {
-            try {
-                if (eventType == EventType.APPROACH) {
-                    isAudioMuted = true
-                    toneGenerator.startTone(ToneGenerator.TONE_DTMF_S, 800)
-                    Log.i(TAG, "🔊 接近警告音鳴動 (音量検知一時ミュート開始)")
-                    Thread.sleep(800L)
-                    isAudioMuted = false
-                    Log.i(TAG, "🔊 接近警告音終了 (音量検知ミュート解除)")
-                } else {
-                    Log.i(TAG, "ℹ️ ${eventType.displayName}検知: 警告音なしでセグメント保護を実行します")
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to handle alert tone / mute", e)
-                isAudioMuted = false
-            }
+            Log.i(TAG, "ℹ️ ${eventType.displayName}検知: セグメント保護を実行します")
 
             val currentFilePath = _serviceState.value.currentFile
             val currentFileObj = File(currentFilePath)
@@ -513,7 +535,8 @@ class RecordingService : Service(), LifecycleOwner {
             detectionLog.segmentName = currentSegmentName
 
             // 1. 一世代前のセグメント（完了済み）を取得して即時保護を試みる
-            val previousCompletedFile = ringBufferManager?.getPreviousCompletedSegmentFile(currentFilePath)
+            val previousCompletedFile =
+                ringBufferManager?.getPreviousCompletedSegmentFile(currentFilePath)
             val coveredFiles = mutableListOf<String>()
 
             if (previousCompletedFile != null) {
@@ -522,7 +545,7 @@ class RecordingService : Service(), LifecycleOwner {
                     prevSeg = RecordingSegment(
                         segmentName = previousCompletedFile.name,
                         filePath = previousCompletedFile.absolutePath,
-                        startTimeMs = previousCompletedFile.lastModified() - 60_000L,
+                        startTimeMs = previousCompletedFile.lastModified() - RING_BUFFER_INTERVAL_MS,
                         endTimeMs = previousCompletedFile.lastModified(),
                         isProtected = false
                     )
@@ -536,7 +559,12 @@ class RecordingService : Service(), LifecycleOwner {
                         val destFile = File(recordingsDir, previousCompletedFile.name)
                         previousCompletedFile.copyTo(destFile, overwrite = true)
                         prevSeg.isProtected = true
-                        MediaScannerConnection.scanFile(this@RecordingService, arrayOf(destFile.absolutePath), null, null)
+                        MediaScannerConnection.scanFile(
+                            this@RecordingService,
+                            arrayOf(destFile.absolutePath),
+                            null,
+                            null
+                        )
                         coveredFiles.add(destFile.absolutePath)
 
                         traceLogger.logProtectionTrace(
@@ -569,7 +597,12 @@ class RecordingService : Service(), LifecycleOwner {
                     }
                 } else {
                     // ケース2: 一世代前セグメントがすでに保護済み ➔ 追加通知・保護はスキップ (通知スパム抑制)
-                    coveredFiles.add(File(FileUtils.getRecordingsDir(this@RecordingService), previousCompletedFile.name).absolutePath)
+                    coveredFiles.add(
+                        File(
+                            FileUtils.getRecordingsDir(this@RecordingService),
+                            previousCompletedFile.name
+                        ).absolutePath
+                    )
                     traceLogger.logProtectionTrace(
                         SegmentProtectionTraceEntry(
                             segmentName = prevSeg.segmentName,
@@ -612,23 +645,30 @@ class RecordingService : Service(), LifecycleOwner {
             }
 
             val candidateSet = coveredFiles.toSet()
-            val existingIncidents = IncidentLogStore.loadIncidents(this@RecordingService).toMutableList()
+            val existingIncidents =
+                IncidentLogStore.loadIncidents(this@RecordingService).toMutableList()
 
             // インシデント統合判定
             var targetWindow: IncidentWindow? = null
             var targetIncident: IncidentLog? = null
 
             for ((_, window) in activeIncidentWindows) {
-                if (window.targetSegmentPaths.any { candidateSet.contains(it) } || candidateSet.any { window.targetSegmentPaths.contains(it) }) {
+                if (window.targetSegmentPaths.any { candidateSet.contains(it) } || candidateSet.any {
+                        window.targetSegmentPaths.contains(
+                            it
+                        )
+                    }) {
                     targetWindow = window
-                    targetIncident = existingIncidents.find { it.id == window.incidentId && it.status == IncidentStatus.PENDING }
+                    targetIncident =
+                        existingIncidents.find { it.id == window.incidentId && it.status == IncidentStatus.PENDING }
                     break
                 }
             }
 
             if (targetWindow != null && targetIncident != null) {
                 targetWindow.relatedDetectionIds.add(detectionLog.id)
-                targetWindow.highestSeverityType = getHigherSeverity(targetWindow.highestSeverityType, eventType)
+                targetWindow.highestSeverityType =
+                    getHigherSeverity(targetWindow.highestSeverityType, eventType)
                 targetWindow.targetSegmentPaths.addAll(candidateSet)
 
                 targetIncident.relatedDetectionIds = targetWindow.relatedDetectionIds.toList()
@@ -636,7 +676,8 @@ class RecordingService : Service(), LifecycleOwner {
                 targetIncident.coveredSegmentFiles = targetWindow.targetSegmentPaths.toList()
 
                 detectionLog.incidentId = targetIncident.id
-                val updatedDetections = EventDetectionLogStore.loadLogs(this@RecordingService).toMutableList()
+                val updatedDetections =
+                    EventDetectionLogStore.loadLogs(this@RecordingService).toMutableList()
                 updatedDetections.forEach { det ->
                     if (targetIncident.relatedDetectionIds.contains(det.id)) {
                         det.incidentId = targetIncident.id
@@ -663,7 +704,8 @@ class RecordingService : Service(), LifecycleOwner {
                 )
 
                 detectionLog.incidentId = newIncident.id
-                val updatedDetections = EventDetectionLogStore.loadLogs(this@RecordingService).toMutableList()
+                val updatedDetections =
+                    EventDetectionLogStore.loadLogs(this@RecordingService).toMutableList()
                 updatedDetections.forEach { det ->
                     if (newIncident.relatedDetectionIds.contains(det.id)) {
                         det.incidentId = newIncident.id
@@ -687,7 +729,11 @@ class RecordingService : Service(), LifecycleOwner {
 
             // 一世代前セグメントが保護された場合のみ即時通知を発報
             if (previousCompletedFile != null && activeSegments[previousCompletedFile.name]?.isProtected == true) {
-                val incToNotify = existingIncidents.find { it.id == targetIncident?.id ?: activeIncidentWindows.values.firstOrNull { w -> w.targetSegmentPaths.contains(previousCompletedFile.absolutePath) }?.incidentId }
+                val incToNotify = existingIncidents.find {
+                    it.id == targetIncident?.id ?: activeIncidentWindows.values.firstOrNull { w ->
+                        w.targetSegmentPaths.contains(previousCompletedFile.absolutePath)
+                    }?.incidentId
+                }
                 if (incToNotify != null) {
                     showRecordingCompletionNotification(incToNotify)
                     Log.i(TAG, "🔔 一世代前セグメント即時保護通知を発報しました: ${incToNotify.id}")
@@ -717,6 +763,7 @@ class RecordingService : Service(), LifecycleOwner {
             is VideoRecordEvent.Start -> {
                 Log.i(TAG, "Started recording segment: $filePath")
             }
+
             is VideoRecordEvent.Status -> {
                 statusEventCount++
                 val stats = event.recordingStats
@@ -727,7 +774,7 @@ class RecordingService : Service(), LifecycleOwner {
                 Log.i("AudioStatTrace", "$timeStr\nstatsClass=${stats.javaClass.name}")
                 Log.i("AudioStatTrace", "$timeStr\naudioStats=$audioStats")
 
-                val audioAmplitude = audioStats.audioAmplitude ?: -999
+                val audioAmplitude = audioStats.audioAmplitude
                 val audioAmp = audioAmplitude.toFloat().coerceIn(0f, 32767f)
                 Log.i("AudioStatTrace", "$timeStr\naudioAmplitude=$audioAmplitude")
 
@@ -739,7 +786,11 @@ class RecordingService : Service(), LifecycleOwner {
                     val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
                     val soundSensitivity = prefs.getFloat("key_sound_sensitivity", 0.6f)
                     if (audioAmp >= soundSensitivity) {
-                        handleDetectedEvent(EventType.SOUND, audioAmp, "振幅: ${((audioAmp / 1.5f) * 100).toInt()}%")
+                        handleDetectedEvent(
+                            EventType.SOUND,
+                            audioAmp,
+                            "振幅: ${((audioAmp / 1.5f) * 100).toInt()}%"
+                        )
                     }
                 }
 
@@ -748,6 +799,7 @@ class RecordingService : Service(), LifecycleOwner {
                     elapsedTimeSec = stats.recordedDurationNanos / 1_000_000_000L
                 )
             }
+
             is VideoRecordEvent.Finalize -> {
                 recordingStopContinuation?.resume(Unit)
                 recordingStopContinuation = null
@@ -767,13 +819,19 @@ class RecordingService : Service(), LifecycleOwner {
 
                         if (seg != null && seg.pendingProtection) {
                             try {
-                                val recordingsDir = FileUtils.getRecordingsDir(this@RecordingService)
+                                val recordingsDir =
+                                    FileUtils.getRecordingsDir(this@RecordingService)
                                 val destFile = File(recordingsDir, finalizedFile.name)
                                 finalizedFile.copyTo(destFile, overwrite = true)
                                 seg.isProtected = true
                                 seg.pendingProtection = false
                                 seg.endTimeMs = finalizedFile.lastModified()
-                                MediaScannerConnection.scanFile(this@RecordingService, arrayOf(destFile.absolutePath), null, null)
+                                MediaScannerConnection.scanFile(
+                                    this@RecordingService,
+                                    arrayOf(destFile.absolutePath),
+                                    null,
+                                    null
+                                )
 
                                 traceLogger.logProtectionTrace(
                                     SegmentProtectionTraceEntry(
@@ -804,18 +862,28 @@ class RecordingService : Service(), LifecycleOwner {
                         }
 
                         val iterator = activeIncidentWindows.iterator()
-                        val incidents = IncidentLogStore.loadIncidents(this@RecordingService).toMutableList()
+                        val incidents =
+                            IncidentLogStore.loadIncidents(this@RecordingService).toMutableList()
 
                         while (iterator.hasNext()) {
                             val entry = iterator.next()
                             val window = entry.value
                             if (window.targetSegmentPaths.any { File(it).absolutePath == finalizedFile.absolutePath }) {
                                 if (finalizedFile.exists() && finalizedFile.length() > 0) {
-                                    val recordingsDir = FileUtils.getRecordingsDir(this@RecordingService)
+                                    val recordingsDir =
+                                        FileUtils.getRecordingsDir(this@RecordingService)
                                     val destFile = File(recordingsDir, finalizedFile.name)
                                     finalizedFile.copyTo(destFile, overwrite = true)
-                                    MediaScannerConnection.scanFile(this@RecordingService, arrayOf(destFile.absolutePath), null, null)
-                                    Log.i(TAG, "🔒 現行セグメント(書き込み中)のファイナライズ完了・保護コピー実行: ${destFile.absolutePath}")
+                                    MediaScannerConnection.scanFile(
+                                        this@RecordingService,
+                                        arrayOf(destFile.absolutePath),
+                                        null,
+                                        null
+                                    )
+                                    Log.i(
+                                        TAG,
+                                        "🔒 現行セグメント(書き込み中)のファイナライズ完了・保護コピー実行: ${destFile.absolutePath}"
+                                    )
                                 }
 
                                 val inc = incidents.find { it.id == window.incidentId }
@@ -825,7 +893,8 @@ class RecordingService : Service(), LifecycleOwner {
                                         inc.timestampMs = finalizedFile.lastModified()
                                     }
 
-                                    val recordingsDir = FileUtils.getRecordingsDir(this@RecordingService)
+                                    val recordingsDir =
+                                        FileUtils.getRecordingsDir(this@RecordingService)
                                     val destFile = File(recordingsDir, finalizedFile.name)
                                     val updatedPaths = inc.coveredSegmentFiles.map { oldPath ->
                                         val oldFile = File(oldPath)
@@ -840,7 +909,10 @@ class RecordingService : Service(), LifecycleOwner {
                                     }
 
                                     IncidentLogStore.saveIncidents(this@RecordingService, incidents)
-                                    Log.i(TAG, "✨ PENDING → SUCCESS 状態遷移完了(現行セグメント完了時): ${inc.id}")
+                                    Log.i(
+                                        TAG,
+                                        "✨ PENDING → SUCCESS 状態遷移完了(現行セグメント完了時): ${inc.id}"
+                                    )
                                     showRecordingCompletionNotification(inc)
                                     iterator.remove()
                                 }
@@ -848,21 +920,33 @@ class RecordingService : Service(), LifecycleOwner {
                         }
 
                         // フェイルセーフ: パスが空のインシデントがあれば、今回のファイナライズファイルで強制補完
-                        val freshIncidents = IncidentLogStore.loadIncidents(this@RecordingService).toMutableList()
-                        val pendingIncidents = freshIncidents.filter { it.status == IncidentStatus.PENDING && (it.videoFilePath.isEmpty() || it.coveredSegmentFiles.isEmpty()) }
+                        val freshIncidents =
+                            IncidentLogStore.loadIncidents(this@RecordingService).toMutableList()
+                        val pendingIncidents =
+                            freshIncidents.filter { it.status == IncidentStatus.PENDING && (it.videoFilePath.isEmpty() || it.coveredSegmentFiles.isEmpty()) }
                         if (pendingIncidents.isNotEmpty() && finalizedFile.exists() && finalizedFile.length() > 0) {
                             val recordingsDir = FileUtils.getRecordingsDir(this@RecordingService)
                             val destFile = File(recordingsDir, finalizedFile.name)
                             if (!destFile.exists()) {
                                 finalizedFile.copyTo(destFile, overwrite = true)
-                                MediaScannerConnection.scanFile(this@RecordingService, arrayOf(destFile.absolutePath), null, null)
+                                MediaScannerConnection.scanFile(
+                                    this@RecordingService,
+                                    arrayOf(destFile.absolutePath),
+                                    null,
+                                    null
+                                )
                             }
 
                             pendingIncidents.forEach { inc ->
-                                if (inc.videoFilePath.isEmpty()) inc.videoFilePath = destFile.absolutePath
-                                if (inc.coveredSegmentFiles.isEmpty()) inc.coveredSegmentFiles = mutableListOf(destFile.absolutePath)
+                                if (inc.videoFilePath.isEmpty()) inc.videoFilePath =
+                                    destFile.absolutePath
+                                if (inc.coveredSegmentFiles.isEmpty()) inc.coveredSegmentFiles =
+                                    mutableListOf(destFile.absolutePath)
                                 inc.status = IncidentStatus.SUCCESS
-                                Log.i(TAG, "🛡️ フェイルセーフ救済: パス空のインシデント ${inc.id} に ${destFile.absolutePath} を強制紐付けました")
+                                Log.i(
+                                    TAG,
+                                    "🛡️ フェイルセーフ救済: パス空のインシデント ${inc.id} に ${destFile.absolutePath} を強制紐付けました"
+                                )
                             }
                             IncidentLogStore.saveIncidents(this@RecordingService, freshIncidents)
                         }
@@ -904,7 +988,10 @@ class RecordingService : Service(), LifecycleOwner {
                     }
                 }
                 if (finalizedResult == null) {
-                    Log.w(TAG, "⚠️ 録画ファイルのファイナライズ (Finalized) 待機が 3000ms でタイムアウトしました。強制的にリソース解放へ移行します")
+                    Log.w(
+                        TAG,
+                        "⚠️ 録画ファイルのファイナライズ (Finalized) 待機が 3000ms でタイムアウトしました。強制的にリソース解放へ移行します"
+                    )
                 } else {
                     Log.i(TAG, "🎬 録画ファイルのファイナライズ (Finalized) を確認しました")
                 }
@@ -948,7 +1035,8 @@ class RecordingService : Service(), LifecycleOwner {
         val intent = Intent(this, MainActivity::class.java).apply {
             action = Intent.ACTION_VIEW
             putExtra("EXTRA_TARGET_EVENT_ID", incidentLog.triggerDetectionLogId)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            flags =
+                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         val pendingIntent = PendingIntent.getActivity(
             this, incidentLog.id.hashCode(), intent,
@@ -971,7 +1059,6 @@ class RecordingService : Service(), LifecycleOwner {
     override fun onDestroy() {
         collisionDropDetector?.stopListening()
         analysisExecutor.shutdown()
-        toneGenerator.release()
         super.onDestroy()
     }
 }

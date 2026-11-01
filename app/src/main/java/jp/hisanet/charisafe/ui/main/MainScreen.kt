@@ -1,7 +1,6 @@
 package jp.hisanet.charisafe.ui.main
 
 import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -94,10 +93,10 @@ fun MainScreen(
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                 )
                 NavigationDrawerItem(
-                    label = { Text("📈 ライド結果", fontSize = 18.sp) },
-                    selected = uiState.currentScreen == Screen.RIDE_RESULTS,
+                    label = { Text("📈 ライドサマリ", fontSize = 18.sp) },
+                    selected = uiState.currentScreen == Screen.RIDE_SUMMARY,
                     onClick = {
-                        viewModel.setScreen(Screen.RIDE_RESULTS)
+                        viewModel.setScreen(Screen.RIDE_SUMMARY)
                         scope.launch { drawerState.close() }
                     },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
@@ -121,7 +120,7 @@ fun MainScreen(
                         val title = when (uiState.currentScreen) {
                             Screen.MAIN -> "ChariSafe ライドモニター"
                             Screen.HISTORY -> "イベント履歴"
-                            Screen.RIDE_RESULTS -> "ライド結果"
+                            Screen.RIDE_SUMMARY -> "ライドサマリ"
                             Screen.SETTINGS -> "設定"
                         }
                         Text(title, fontWeight = FontWeight.Bold, fontSize = 20.sp)
@@ -148,12 +147,14 @@ fun MainScreen(
                 when (uiState.currentScreen) {
                     Screen.MAIN -> MainContent(viewModel, uiState)
                     Screen.HISTORY -> HistoryContent(uiState, highlightedEventId, historyListState)
-                    Screen.RIDE_RESULTS -> RideResultContent(uiState)
-                    Screen.SETTINGS -> SettingsContent(
-                        viewModel = viewModel,
-                        uiState = uiState,
+                    Screen.RIDE_SUMMARY -> RideSummaryContent(
+                        uiState,
                         onShowDeleteDialog = { showDeleteConfirmDialog = true },
                         onShowShareModal = { showShareModal = true }
+                    )
+                    Screen.SETTINGS -> SettingsContent(
+                        viewModel = viewModel,
+                        uiState = uiState
                     )
                 }
             }
@@ -288,15 +289,15 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                 Column {
                     android.util.Log.i("ApproachTrace","UI=${uiState.currentApproachScore}")
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(text = "接近 ${(uiState.sensitivity.approachSensitivity * 100).toInt()}%", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "接近 ${String.format(Locale.US, "%.1f", uiState.sensitivity.approachSensitivity)}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Text(text = "${uiState.sessionEventCounts.approachCount}件", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                     ThresholdBar(
                         currentValue = uiState.currentApproachScore,
-                        thresholdValue = uiState.sensitivity.approachSensitivity * 100f,
-                        onThresholdChanged = { viewModel.updateSensitivity(uiState.sensitivity.copy(approachSensitivity = it / 100f)) },
+                        thresholdValue = uiState.sensitivity.approachSensitivity,
+                        onThresholdChanged = { viewModel.updateSensitivity(uiState.sensitivity.copy(approachSensitivity = it)) },
                         minValue = 0f,
-                        maxValue = 100f
+                        maxValue = 20f
                     )
                 }
 
@@ -586,7 +587,7 @@ fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState:
                                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                             }
                                             context.startActivity(intent)
-                                        } catch (e: Exception) {}
+                                        } catch (_: Exception) {}
                                     },
                                 colors = CardDefaults.cardColors(
                                     containerColor = if (isHighlighted) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surface
@@ -626,10 +627,14 @@ fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState:
 }
 
 /**
- * 📈 ライド結果画面
+ * 📈 ライドサマリ画面
  */
 @Composable
-fun RideResultContent(uiState: MainUiState) {
+fun RideSummaryContent(
+        uiState: MainUiState,
+        onShowDeleteDialog: () -> Unit,
+        onShowShareModal: () -> Unit
+    ) {
     val target = uiState.currentRideSummary
 
     if (target == null) {
@@ -659,28 +664,62 @@ fun RideResultContent(uiState: MainUiState) {
                     Text(text = "平均速度: ${String.format(Locale.US, "%.1f", target.averageSpeedKmh)} km/h", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     Text(text = "最高速度: ${String.format(Locale.US, "%.1f", target.maxSpeedKmh)} km/h", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
 
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(text = "【危険度定量的指標】", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.primary)
-                    
                     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                        Text(text = "🚗 接近: ${target.eventCounts.approachCount}件", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "   • 距離あたり: ${String.format(Locale.US, "%.2f", target.approachPerKm)} 件/km", fontSize = 16.sp, color = Color.LightGray)
-                        Text(text = "   • 時間あたり: ${String.format(Locale.US, "%.1f", target.approachPerHour)} 件/h", fontSize = 16.sp, color = Color.LightGray)
+                        Text(text = "🚗 接近: ${target.eventCounts.approachCount}件 ${
+                            String.format(
+                                Locale.US,
+                                "%.1f",
+                                target.approachPerHour
+                            )
+                        } 件/h", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                        Text(text = "⚠ 減速: ${target.eventCounts.decelerationCount}件", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "   • 距離あたり: ${String.format(Locale.US, "%.2f", target.decelerationPerKm)} 件/km", fontSize = 16.sp, color = Color.LightGray)
-                        Text(text = "   • 時間あたり: ${String.format(Locale.US, "%.1f", target.decelerationPerHour)} 件/h", fontSize = 16.sp, color = Color.LightGray)
+                        Text(text = "⚠ 減速: ${target.eventCounts.decelerationCount}件 ${
+                            String.format(
+                                Locale.US,
+                                "%.1f",
+                                target.decelerationPerHour
+                            )
+                        } 件/h", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                        Text(text = "💥 衝撃: ${target.eventCounts.collisionCount}件", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "   • 距離あたり: ${String.format(Locale.US, "%.2f", target.collisionPerKm)} 件/km", fontSize = 16.sp, color = Color.LightGray)
-                        Text(text = "   • 時間あたり: ${String.format(Locale.US, "%.1f", target.collisionPerHour)} 件/h", fontSize = 16.sp, color = Color.LightGray)
+                        Text(text = "💥 衝撃: ${target.eventCounts.collisionCount}件 ${
+                            String.format(
+                                Locale.US,
+                                "%.1f",
+                                target.collisionPerHour
+                            )
+                        } 件/h", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                        Text(text = "🔊 音量: ${target.eventCounts.soundCount}件", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "   • 距離あたり: ${String.format(Locale.US, "%.2f", target.soundPerKm)} 件/km", fontSize = 16.sp, color = Color.LightGray)
-                        Text(text = "   • 時間あたり: ${String.format(Locale.US, "%.1f", target.soundPerHour)} 件/h", fontSize = 16.sp, color = Color.LightGray)
+                        Text(text = "🔊 音量: ${target.eventCounts.soundCount}件 ${
+                            String.format(
+                                Locale.US,
+                                "%.1f",
+                                target.soundPerHour
+                            )
+                        } 件/h", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Button(
+                                onClick = onShowShareModal,
+                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                            ) {
+                                Text("共有", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = onShowDeleteDialog,
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                modifier = Modifier.fillMaxWidth().height(48.dp)
+                            ) {
+                                Text("削除", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
             }
@@ -694,9 +733,7 @@ fun RideResultContent(uiState: MainUiState) {
 @Composable
 fun SettingsContent(
     viewModel: MainViewModel,
-    uiState: MainUiState,
-    onShowDeleteDialog: () -> Unit,
-    onShowShareModal: () -> Unit
+    uiState: MainUiState
 ) {
     val config = uiState.config
     val isRecording = uiState.status.state == RecordingState.RECORDING
@@ -818,33 +855,6 @@ fun SettingsContent(
                                 )
                             }
                         }
-                    }
-                }
-            }
-        }
-
-        // 2. ライドデータ
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(text = "ライドデータ", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White)
-
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Button(
-                        onClick = onShowShareModal,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
-                    ) {
-                        Text("共有", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Button(
-                        onClick = onShowDeleteDialog,
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
-                    ) {
-                        Text("削除", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

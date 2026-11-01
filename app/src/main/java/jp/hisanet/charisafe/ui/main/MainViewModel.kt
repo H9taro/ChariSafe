@@ -49,7 +49,7 @@ import androidx.core.content.edit
 import kotlin.time.Duration.Companion.milliseconds
 
 enum class Screen {
-    MAIN, HISTORY, RIDE_RESULTS, SETTINGS
+    MAIN, HISTORY, RIDE_SUMMARY, SETTINGS
 }
 
 sealed class TimelineItem(open val timestampMs: Long) {

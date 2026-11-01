@@ -44,7 +44,6 @@ ChariSafe は、バックグラウンドでの安定稼働と省電力性を最�
 | **Domain - Model** (`domain.model`) | `AppConfig`<br>`SystemStatus`<br>`EventDetectionLog`<br>`IncidentLog`<br>`GpxPoint`<br>`RideSummary` | アプリ全体で扱うデータ構造の定義 | 純粋なデータモデル |
 | **Domain - Repository I/F** (`domain.repository`) | `ConfigRepository`<br>`EventLogRepository`<br>`GpxRepository`<br>`RecordingRepository` | データアクセスおよびサービス操作のための抽象インターフェース群 | `data` レイヤーで具現化実装 |
 | **Data - Service** (`data.service`) | `RecordingService` | **バックグラウンド中核処理**。<br>CameraXによる動画録画、リングバッファ切替、各検知器のライフサイクル制御、リアルタイム StateFlow の中継、イベント発生時のセグメント保護発火 | - Intent (`ACTION_START_RECORDING` / `ACTION_STOP_RECORDING`)<br>- Bind (`LocalBinder`)<br>- StateFlow (`ServiceState` & リアルタイム各数値) |
-| **Data - Service** (`data.service`) | `EventCoordinator` | イベント発生時のセグメント保護排他制御（ロック）と危険度（Severity）調停 | `RecordingService` 内でスレッドセーフに実行 |
 | **Data - Detectors** (`data.camera`, `data.sensor`, `data.location`) | `RearApproachDetector`<br>`SpeedDecelerationDetector`<br>`CollisionDropDetector`<br>`AudioImpactDetector` | カメラ画像解析、GPS速度変化、加速度、マイク音声によるリアルタイム危険検知。**常時リアルタイム評価値を StateFlow として公開** | 検知時にコールバック発火。<br>常時リアルタイム値を StateFlow でストリーミング発行 |
 | **Data - Location** (`data.location`) | `LocationTracker` | GPS/ネットワークによる位置情報・速度の取得と GPX ポイント化 | StateFlow `currentLocation` |
 | **Data - Local Storage** (`data.local`) | `RingBufferManager`<br>`EventDetectionLogStore`<br>`IncidentLogStore`<br>`RideSummaryStore` | 動画リングバッファ (`seg_*.mp4`) の削除・保護退避、イベント履歴・走行結果の JSON 永続化 | 同期/非同期 ファイル I/O |
@@ -147,7 +146,7 @@ flowchart TD
 
 | モジュール名 | 公開 I/F | 入力パラメータ | 出力 / 戻り値 | 呼び出し元 | 呼び出し先 |
 |---|---|---|---|---|---|
-| **`RecordingService`** | `onStartCommand` | `Intent` (Action, ActiveCamera, RingBufferMinutes, Fps 等) | `START_NOT_STICKY` | `RecordingRepositoryImpl`, `MainViewModel` | `RingBufferManager`, 各 Detector, `EventCoordinator`, `EventLogRepositoryImpl` |
+| **`RecordingService`** | `onStartCommand` | `Intent` (Action, ActiveCamera, RingBufferMinutes, Fps 等) | `START_NOT_STICKY` | `RecordingRepositoryImpl`, `MainViewModel` | `RingBufferManager`, 各 Detector, `EventLogRepositoryImpl` |
 | **`ConfigRepository`** | `getConfig()` / `updateConfig()` | `AppConfig` | `AppConfig` / `Unit` | `MainViewModel`, `RecordingService` | `SharedPreferences` |
 | **`EventLogRepository`** | `addDetectionLog()` / `addOrUpdateIncidentLog()` | `EventDetectionLog` / `IncidentLog` | `Unit` | `RecordingService`, `MainViewModel` | `EventDetectionLogStore`, `IncidentLogStore` |
 | **`GpxRepository`** | `startLogging()` / `stopLogging()` | `intervalSeconds: Long` | `Unit` | `MainViewModel` | `LocationTracker`, `GpxFileWriter` |
@@ -312,7 +311,6 @@ flowchart TD
 | **CameraX 録画パイプライン** | バックグラウンドでの CameraX セッション構築、目標FPS（10fps）の指定、ImageAnalysis（後方接近検知）との同期実行、動画出力。 | `startRecordingPipeline`, `setupVideoCaptureAndStart`, `startVideoFileOutput`, `stopRecordingPipeline` |
 | **セグメント自動ローテーション** | Coroutine タイマーにより 1 分ごとに循環動画セグメント (`seg_*.mp4`) の切り替え・作成を実行。 | `startSegmentRotationTimer`, `stopSegmentRotationTimer` |
 | **センサー検知器統括** | 加速度、マイク、カメラの各 Detector の登録・監視・停止およびリアルタイム StateFlow の中継制御。 | `collisionDropDetector`, `audioImpactDetector` の起動/停止 |
-| **イベント検出 & 保護排他制御** | 各 Detector からのイベント通知を受信。`EventCoordinator` を使用した保護排他ロックおよび動画セグメント退避コピーの実行。 | `handleDetectedEvent`, `EventCoordinator.executeWithProtection` |
 | **通知・警告音制御** | イベント発生時のビープ警告音発報、および保護完了時の OS 通知発行。 | `toneGenerator`, `showRecordingCompletionNotification` |
 
 ---
@@ -345,17 +343,7 @@ flowchart TD
 
 ---
 
-## 17. `EventCoordinator` 内部責務定義
-
-| 内部責務区分 | 具体的内容 | 関連メソッド / フィールド |
-|---|---|---|
-| **排他保護ロック制御** | セグメント保護（コピー）処理実行中の重複・割り込み実行を AtomicBoolean で調停。 | `isProtectingLock` (`AtomicBoolean`), `isLocked()`, `executeWithProtection()` |
-| **関連イベントの集約** | 保護期間中に連続発生した全検知ログIDを同一インシデント候補として追跡集約。 | `activeRelatedDetectionIds`, `startIncidentSession()`, `recordDetectionDuringProtection()` |
-| **最高危険度 (Severity) 調停** | 複数の異種イベントが短時間で重なった際、最上位の危険度を判定。(衝撃4 > 減速3 > 音量2 > 接近1) | `activeHighestSeverityType`, `getHigherSeverity()`, `getAndClearActiveIncidentData()` |
-
----
-
-## 18. Repository 公開 API 仕様一覧
+## 17. Repository 公開 API 仕様一覧
 
 | インターフェース | メソッド名 | 引数 (Inputs) | 戻り値 (Outputs) | 主な役割 |
 |---|---|---|---|---|
@@ -374,9 +362,9 @@ flowchart TD
 
 ---
 
-## 19. 永続化 JSON スキーマ定義
+## 18. 永続化 JSON スキーマ定義
 
-### 19.1 イベント検知ログ (`logs/event_detection_logs.json`)
+### 18.1 イベント検知ログ (`logs/event_detection_logs.json`)
 ```json
 [
   {
@@ -394,7 +382,7 @@ flowchart TD
 ]
 ```
 
-### 19.2 インシデント保護ログ (`logs/incident_logs.json`)
+### 18.2 インシデント保護ログ (`logs/incident_logs.json`)
 ```json
 [
   {
@@ -413,7 +401,7 @@ flowchart TD
 ]
 ```
 
-### 19.3 走行結果サマリー (`logs/ride_summaries.json`)
+### 18.3 走行結果サマリー (`logs/ride_summaries.json`)
 ```json
 [
   {
@@ -444,7 +432,7 @@ flowchart TD
 
 ---
 
-## 20. Detector アルゴリズム・入出力・内部パラメータ一覧
+## 19. Detector アルゴリズム・入出力・内部パラメータ一覧
 
 | Detector クラス | 入力データ (Input) | 内部アルゴリズム / 判定条件 | 閾値・内部パラメータ | 出力 / コールバック & StateFlow |
 |---|---|---|---|---|
@@ -455,7 +443,7 @@ flowchart TD
 
 ---
 
-## 21. システム全体のデータ単位変換仕様一覧
+## 20. システム全体のデータ単位変換仕様一覧
 
 第三者がアルゴリズムや表示ロジックを正確に再構築するための変換規則である。
 
@@ -471,7 +459,7 @@ flowchart TD
 
 ---
 
-## 22. 出力ファイル一覧 (Name / Purpose / Lifecycle / Data Items)
+## 21. 出力ファイル一覧 (Name / Purpose / Lifecycle / Data Items)
 
 ChariSafe アプリが内部ストレージ (`files/debug`, `files/logs`, `files/gpx`, `files/recordings`) に出力するすべての出力ファイルの仕様である。
 
