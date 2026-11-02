@@ -437,6 +437,34 @@ fun HistoryContent(
 ) {
     val context = LocalContext.current
     val grouped = uiState.groupedTimelineItems
+    val highlightedEventId = uiState.targetEventIdToHighlight
+
+    LaunchedEffect(highlightedEventId) {
+        if (!highlightedEventId.isNullOrEmpty()) {
+            var flatIndex = 0
+            var found = false
+            for ((_, items) in grouped) {
+                flatIndex++ // 日付ヘッダー分
+                for (item in items) {
+                    if (item is TimelineItem.Recording) {
+                        if (item.incidentLog.id == highlightedEventId || item.incidentLog.triggerDetectionLogId == highlightedEventId) {
+                            found = true
+                            break
+                        }
+                    }
+                    flatIndex++
+                }
+                if (found) break
+            }
+            if (found) {
+                try {
+                    listState.animateScrollToItem(flatIndex)
+                } catch (e: Exception) {
+                    android.util.Log.e("HistoryContent", "Failed to scroll to highlighted item", e)
+                }
+            }
+        }
+    }
 
     if (grouped.isEmpty())
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
