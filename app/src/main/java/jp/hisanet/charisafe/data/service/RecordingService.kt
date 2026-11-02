@@ -57,6 +57,7 @@ import jp.hisanet.charisafe.domain.model.EventSensitivity
 import jp.hisanet.charisafe.domain.model.EventType
 import jp.hisanet.charisafe.domain.model.IncidentLog
 import jp.hisanet.charisafe.domain.model.IncidentStatus
+import jp.hisanet.charisafe.ui.model.EventUiConfig
 import jp.hisanet.charisafe.domain.model.ProtectionFailureReason
 import jp.hisanet.charisafe.domain.model.ProtectionReason
 import jp.hisanet.charisafe.domain.model.RecordingSegment
@@ -192,10 +193,12 @@ class RecordingService : Service(), LifecycleOwner {
         collisionDropDetector = CollisionDropDetector(this, collisionDebugLogger) {
             val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
             val sens = prefs.getFloat("key_collision_sensitivity", 3.0f)
+            val detectedG = collisionDropDetector?.gForceState?.value ?: sens
             handleDetectedEvent(
                 EventType.COLLISION,
-                sens,
-                "${String.format(Locale.US, "%.1f", sens)}${EventType.COLLISION.unitName}"
+                detectedValue = detectedG,
+                thresholdValue = sens,
+                displayLabel = "${String.format(Locale.US, "%.2f", detectedG)} / ${String.format(Locale.US, "%.2f", sens)} G"
             )
         }
     }
@@ -415,8 +418,13 @@ class RecordingService : Service(), LifecycleOwner {
         }) {
             val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
             val sens = prefs.getFloat("key_approach_sensitivity", 100f)
-            val sensString = String.format(Locale.US, "%.1f", sens)
-            handleDetectedEvent(EventType.APPROACH, sens, "${sensString}${EventType.APPROACH.unitName}")
+            val detectedScore = rearApproachDetector?.approachScoreState?.value ?: sens
+            handleDetectedEvent(
+                EventType.APPROACH,
+                detectedValue = detectedScore,
+                thresholdValue = sens,
+                displayLabel = "${String.format(Locale.US, "%.2f", detectedScore)} / ${String.format(Locale.US, "%.2f", sens)}"
+            )
         }
         rearApproachDetector = detector
         approachCollectJob?.cancel()
@@ -499,16 +507,16 @@ class RecordingService : Service(), LifecycleOwner {
             EventType.APPROACH -> prefs.getFloat("key_approach_sensitivity", 0.7f)
             EventType.DECELERATION -> prefs.getFloat("key_decel_sensitivity", 1.5f)
             EventType.COLLISION -> prefs.getFloat("key_collision_sensitivity", 3.0f)
-            EventType.SOUND -> (prefs.getFloat("key_sound_sensitivity", 5000.0f)) / 50f
+            EventType.SOUND -> prefs.getFloat("key_sound_sensitivity", 0.7f)
         }
-        val label = "${sens}${eventType.unitName}"
-        handleDetectedEvent(eventType, sens, label)
+        handleDetectedEvent(eventType, detectedValue = sens, thresholdValue = sens, displayLabel = "${sens}${EventUiConfig.get(eventType).unitName}")
     }
 
     fun handleDetectedEvent(
         eventType: EventType,
-        sensitivityValue: Float,
-        sensitivityLabel: String
+        detectedValue: Float,
+        thresholdValue: Float,
+        displayLabel: String = ""
     ) {
         val now = System.currentTimeMillis()
         if (now - recordingStartTimeMs < 3000L) return
@@ -516,13 +524,6 @@ class RecordingService : Service(), LifecycleOwner {
         val lat = LocationTracker.lastValidLatitude
         val lon = LocationTracker.lastValidLongitude
         val speedKmh = LocationTracker.lastValidSpeedKmh
-        val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
-        val snapshot = EventSensitivity(
-            approachSensitivity = prefs.getFloat("key_approach_sensitivity", 0.7f),
-            decelerationSensitivity = prefs.getFloat("key_decel_sensitivity", 1.5f),
-            collisionSensitivity = prefs.getFloat("key_collision_sensitivity", 3.0f),
-            soundSensitivity = prefs.getFloat("key_sound_sensitivity", 0.7f)
-        )
 
         val detectionLog = EventDetectionLog(
             timestampMs = now,
@@ -530,8 +531,9 @@ class RecordingService : Service(), LifecycleOwner {
             speedKmh = speedKmh,
             latitude = lat,
             longitude = lon,
-            sensitivityValue = sensitivityValue,
-            sensitivityLabel = sensitivityLabel
+            detectedValue = detectedValue,
+            thresholdValue = thresholdValue,
+            displayLabel = displayLabel
         )
 
         val existingDetections = EventDetectionLogStore.loadLogs(this).toMutableList()
@@ -539,7 +541,7 @@ class RecordingService : Service(), LifecycleOwner {
         EventDetectionLogStore.saveLogs(this, existingDetections)
 
         serviceScope.launch(Dispatchers.IO) {
-            Log.i(TAG, "ℹ️ ${eventType.displayName}検知: セグメント保護を実行します")
+            Log.i(TAG, "ℹ️ ${EventUiConfig.get(eventType).displayName}検知: セグメント保護を実行します")
 
             val currentFilePath = _serviceState.value.currentFile
             val currentFileObj = File(currentFilePath)
@@ -800,8 +802,9 @@ class RecordingService : Service(), LifecycleOwner {
                     if (audioAmp >= soundSensitivity) {
                         handleDetectedEvent(
                             EventType.SOUND,
-                            audioAmp,
-                            "${((audioAmp / 1.5f) * 100).toInt()}${EventType.SOUND.unitName}"
+                            detectedValue = audioAmp,
+                            thresholdValue = soundSensitivity,
+                            displayLabel = "${String.format(Locale.US, "%.2f", audioAmp)} / ${String.format(Locale.US, "%.2f", soundSensitivity)}"
                         )
                     }
                 }
@@ -1057,7 +1060,7 @@ class RecordingService : Service(), LifecycleOwner {
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("ChariSafe 記録セグメント保護完了")
-            .setContentText("${incidentLog.triggerEventType.displayName}イベントの前後動画を保護しました")
+            .setContentText("${EventUiConfig.get(incidentLog.triggerEventType).displayName}イベントの前後動画を保護しました")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)

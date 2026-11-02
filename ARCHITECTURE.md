@@ -135,10 +135,10 @@ flowchart TD
 
 | 機能種別 | ① リアルタイム StateFlow 値 (生データ) | ② イベント発火閾値 (トリガー条件)                                                              | ③ UI 表示値 (`MainUiState`) | ④ イベントログ保存値 (`EventDetectionLog`) |
 |---|---|------------------------------------------------------------------------------------------------|---|---|
-| **接近 (`APPROACH`)** | `approachScoreState`<br>- カメラフレーム毎の接近スコア<br>- 範囲: `0.0 〜 100.0` | **動的スコア閾値**: `25.0 + (感度 * 45.0)`<br>(範囲: 38.5 〜 70.0)<br>＆ 連続3フレーム以上成立 | `currentApproachScore`<br>- 常時画面の接近バー<br>- リアルタイムスコア (`0〜100`) | - `sensitivityValue`: 設定感度生値 (例: `0.7`)<br>- `sensitivityLabel`: `"感度: 70%"` |
-| **減速 (`DECELERATION`)** | `decelerationState`<br>- 現在のリアルタイム減速度<br>- 単位: `m/s²` (0.0〜5.0) | **減速閾値**: `1.0 〜 4.0 m/s²`<br>＆ 連続2回以上超過                                          | `currentDecelValue`<br>- 常時画面の減速バー<br>- リアルタイム減速度 (`m/s²`) | - `sensitivityValue`: 減速閾値 (例: `1.5`)<br>- `sensitivityLabel`: `"1.5m/s²"` |
-| **衝撃 (`COLLISION`)** | `gForceState`<br>- 3軸合成重力加速度<br>- 単位: `G` (1.0G〜10.0G+) | **衝撃閾値**: `>= 3.0 G`<br>(合成加速度 29.43 m/s² 以上)                                       | `currentGValue`<br>- 常時画面の衝撃バー<br>- リアルタイム合成加速度 (`G`) | - `sensitivityValue`: 衝撃閾値 (例: `3.0`)<br>- `sensitivityLabel`: `"3.0G"` |
-| **音量 (`SOUND`)** | `soundAmplitudeState`<br>- マイク音圧の振幅最大値<br>- 範囲: `0 〜 32767` | **振幅閾値**: `1000 〜 32767`<br>(デフォルト: 5000)                                            | `currentSoundAmplitude`<br>- 常時画面の音量バー<br>- リアルタイム振幅値 (`0〜32767`) | - `sensitivityValue`: 振幅閾値 (例: `5000.0`)<br>- `sensitivityLabel`: `"振幅: 5000"` |
+| **接近 (`APPROACH`)** | `approachScoreState`<br>- カメラフレーム毎の接近スコア<br>- 範囲: `0.0 〜 20.0` | **動的スコア閾値**: スライダー設定値 `0.0 〜 20.0` | `currentApproachScore`<br>- 常時画面の接近バー<br>- リアルタイムスコア (`0〜20`) | - `detectedValue`: 実測スコア (例: `2.85`)<br>- `thresholdValue`: 設定閾値 (例: `1.20`)<br>- `displayLabel`: `"2.85 / 1.20"` |
+| **減速 (`DECELERATION`)** | `decelerationState`<br>- 現在のリアルタイム減速度<br>- 単位: `m/s²` (0.0〜5.0) | **減速閾値**: `1.0 〜 4.0 m/s²` | `currentDecelValue`<br>- 常時画面の減速バー<br>- リアルタイム減速度 (`m/s²`) | - `detectedValue`: 実測減速度 (例: `1.34`)<br>- `thresholdValue`: 設定閾値 (例: `1.20`)<br>- `displayLabel`: `"1.34 / 1.20 m/s²"` |
+| **衝撃 (`COLLISION`)** | `gForceState`<br>- 3軸合成重力加速度<br>- 単位: `G` (1.0G〜10.0G+) | **衝撃閾値**: `>= 3.0 G` | `currentGValue`<br>- 常時画面の衝撃バー<br>- リアルタイム合成加速度 (`G`) | - `detectedValue`: 実測G値 (例: `4.21`)<br>- `thresholdValue`: 設定閾値 (例: `3.50`)<br>- `displayLabel`: `"4.21 / 3.50 G"` |
+| **音量 (`SOUND`)** | `soundAmplitudeState`<br>- マイク音圧の正規化振幅<br>- 範囲: `0.0 〜 1.0` | **振幅閾値**: `0.1 〜 2.0` (デフォルト: 0.7) | `currentSoundAmplitude`<br>- 常時画面の音量バー<br>- リアルタイム振幅値 (`0.0〜1.0`) | - `detectedValue`: 実測振幅 (例: `0.82`)<br>- `thresholdValue`: 設定閾値 (例: `0.70`)<br>- `displayLabel`: `"0.82 / 0.70"` |
 
 ---
 
@@ -278,9 +278,9 @@ flowchart TD
 | `speedKmh` | `Float` | - | km/h | 発生時走行速度 |
 | `latitude` | `Double` | - | degree | 発生時緯度 |
 | `longitude` | `Double` | - | degree | 発生時経度 |
-| `sensitivityValue` | `Float` | - | 生数値 (例: 0.7, 1.5, 3.0, 5000.0) | 検出時の感度設定生数値 |
-| `sensitivityLabel` | `String` | - | 表示文字列 | 画面表示用フォーマットラベル |
-| `sensitivitySnapshot` | `EventSensitivity` | `EventSensitivity()` | オブジェクト | 発生時点の全検出感度のスナップショット |
+| `detectedValue` | `Float` | `0f` | 実測数値 | 実際の検知実測値 (例: 4.21G, 1.34m/s²) |
+| `thresholdValue` | `Float` | `0f` | 閾値数値 | 当時の設定閾値 (例: 3.50G, 1.20m/s²) |
+| `displayLabel` | `String` | `""` | 表示文字列 | 画面表示用の補助フォーマット文字列 |
 | `incidentId` | `String?` | `null` | ID | 紐付けられた IncidentLog ID |
 | `segmentName` | `String` | `""` | ファイル名 | 発生時に録画中だったセグメント動画ファイル名 |
 
@@ -374,8 +374,9 @@ flowchart TD
     "speedKmh": 22.5,
     "latitude": 35.4503,
     "longitude": 139.3929,
-    "sensitivityValue": 0.7,
-    "sensitivityLabel": "感度: 70%",
+    "detectedValue": 2.85,
+    "thresholdValue": 1.20,
+    "displayLabel": "2.85 / 1.20",
     "incidentId": "inc_9982...",
     "segmentName": "seg_20261026_120000.mp4"
   }
@@ -473,7 +474,7 @@ ChariSafe アプリが内部ストレージ (`files/debug`, `files/logs`, `files
 | **`files/debug/deceleration_debug_yyyyMMdd.csv`** | GPS 速度変化に基づく減速度推移ログ | 日付単位で生成。自動クリーンアップ対象。 | `Timestamp`, `SpeedKmh`, `Deceleration`, `Threshold`, `Triggered` |
 | **`files/debug/segment_protection_trace_yyyyMMdd.csv`** | リングバッファセグメント保護のライフサイクル追跡ログ | 日付単位で生成。自動クリーンアップ対象。 | `Timestamp`, `SegmentName`, `IsProtected`, `PendingProtection`, `TriggerEventType`, `ProtectionReason`, `Success` |
 | **`files/logs/incident_logs.json`** | 保護確定および審議中のインシデントログの永続化 | アプリ起動・イベント発生時に随時更新。 | `Id`, `TimestampMs`, `TriggerEventType`, `TriggerDetectionLogId`, `RelatedDetectionIds`, `HighestSeverityType`, `Latitude`, `Longitude`, `VideoFilePath`, `CoveredSegmentFiles`, `Status`, `FailureReason` |
-| **`files/logs/event_detection_logs.json`** | 各 Detector が検知した瞬間イベントログの永続化 | アプリ起動・検知時に随時更新。 | `Id`, `TimestampMs`, `EventType`, `SpeedKmh`, `Latitude`, `Longitude`, `SensitivityValue`, `SensitivityLabel`, `IncidentId` |
+| **`files/logs/event_detection_logs.json`** | 各 Detector が検知した瞬間イベントログの永続化 | アプリ起動・検知時に随時更新。 | `Id`, `TimestampMs`, `EventType`, `SpeedKmh`, `Latitude`, `Longitude`, `DetectedValue`, `ThresholdValue`, `DisplayLabel`, `IncidentId` |
 | **`files/logs/ride_summaries.json`** | ライド（走行セッション）ごとの集計値の永続化 | ライド終了時に生成・保存。 | `StartTimeMs`, `EndTimeMs`, `MovingTimeSec`, `StoppedTimeSec`, `TotalDistanceKm`, `AverageSpeedKmh`, `MaxSpeedKmh`, `EventCounts` |
 | **`files/gpx/ride_yyyyMMdd_HHmmss.gpx`** | 走行軌跡の標準 GPX 形式出力 | 録画開始〜終了まで生成。 | `Latitude`, `Longitude`, `Speed`, `Timestamp` (GPXトラックポイント) |
 | **`files/recordings/seg_yyyyMMdd_HHmmss.mp4`** | ドライブレコーダーの映像データ（リングバッファ/保護） | 1分ごとのローテーション、保護時は recordings/ へ永続コピー。 | H.264 Video + AAC Audio Stream |

@@ -31,6 +31,7 @@ import jp.hisanet.charisafe.domain.repository.ConfigRepository
 import jp.hisanet.charisafe.domain.repository.EventLogRepository
 import jp.hisanet.charisafe.domain.repository.GpxRepository
 import jp.hisanet.charisafe.domain.repository.RecordingRepository
+import jp.hisanet.charisafe.ui.model.EventMetricUiModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.delay
@@ -79,7 +80,8 @@ data class MainUiState(
     val currentApproachScore: Float = 0f,
     val currentDecelValue: Float = 0f,
     val currentGValue: Float = 0f,
-    val currentSoundAmplitude: Float = 0f
+    val currentSoundAmplitude: Float = 0f,
+    val eventMetricCards: List<EventMetricUiModel> = emptyList()
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -249,6 +251,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val timeStr = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
         Log.i("AudioStatTrace", "$timeStr\n6. VmCurrentSoundAmplitude=$soundVal")
 
+        val metricCards = listOf(
+            EventMetricUiModel(
+                eventType = EventType.APPROACH,
+                currentValue = approachVal,
+                thresholdValue = sensitivity.approachSensitivity,
+                eventCount = totalCounts.getCount(EventType.APPROACH)
+            ),
+            EventMetricUiModel(
+                eventType = EventType.DECELERATION,
+                currentValue = decelVal,
+                thresholdValue = sensitivity.decelerationSensitivity,
+                eventCount = totalCounts.getCount(EventType.DECELERATION)
+            ),
+            EventMetricUiModel(
+                eventType = EventType.COLLISION,
+                currentValue = gVal,
+                thresholdValue = sensitivity.collisionSensitivity,
+                eventCount = totalCounts.getCount(EventType.COLLISION)
+            ),
+            EventMetricUiModel(
+                eventType = EventType.SOUND,
+                currentValue = soundVal,
+                thresholdValue = sensitivity.soundSensitivity,
+                eventCount = totalCounts.getCount(EventType.SOUND)
+            )
+        )
+
         MainUiState(
             config = config,
             status = status,
@@ -268,7 +297,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             currentApproachScore = approachVal,
             currentDecelValue = decelVal,
             currentGValue = gVal,
-            currentSoundAmplitude = soundVal
+            currentSoundAmplitude = soundVal,
+            eventMetricCards = metricCards
         )
     }.stateIn(
         scope = viewModelScope,
@@ -296,14 +326,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val lon = currentPoint?.longitude ?: jp.hisanet.charisafe.data.location.LocationTracker.lastValidLongitude
             val speed = currentPoint?.speedKmh ?: jp.hisanet.charisafe.data.location.LocationTracker.lastValidSpeedKmh
 
+            val currentDecel = gpxRepository.decelerationState.value
             val detectionLog = EventDetectionLog(
                 timestampMs = System.currentTimeMillis(),
                 eventType = EventType.DECELERATION,
                 speedKmh = speed,
                 latitude = lat,
                 longitude = lon,
-                sensitivityValue = sens,
-                sensitivityLabel = "${EventType.DECELERATION.displayName}: ${sens}${EventType.DECELERATION.unitName}"
+                detectedValue = currentDecel,
+                thresholdValue = sens,
+                displayLabel = "${String.format(Locale.US, "%.2f", currentDecel)} / ${String.format(Locale.US, "%.2f", sens)} m/s²"
             )
             eventLogRepository.addDetectionLog(detectionLog)
             loadExistingEvents()

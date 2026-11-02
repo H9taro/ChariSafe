@@ -2,30 +2,24 @@ package jp.hisanet.charisafe.domain.model
 
 import java.util.UUID
 
-enum class EventType(val displayName: String, val emoji: String, val unitName: String) {
-    APPROACH("接近", "🚗",""),
-    DECELERATION("減速", "⚠","km/s²"),
-    COLLISION("衝撃", "💥","G"),
-    SOUND("音量", "🔊","%")
-}
-
 data class EventDetectionLog(
     val id: String = UUID.randomUUID().toString(),
     val timestampMs: Long = System.currentTimeMillis(),
     val eventType: EventType,
-    val speedKmh: Float,
-    val latitude: Double,
-    val longitude: Double,
-    val sensitivityValue: Float,           // 生数値
-    val sensitivityLabel: String,          // フォーマット済み表示文字列 ("感度: 7", "1.5秒", "3.0G", "振幅: 50%")
-    var incidentId: String? = null,        // 紐付けられた IncidentLog ID
-    var segmentName: String = ""           // 発生時に録画中だったセグメント名 (例: seg_002.mp4)
+    val speedKmh: Float = 0f,
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0,
+    val detectedValue: Float = 0f,     // 実際の検知値
+    val thresholdValue: Float = 0f,    // 当時の設定閾値
+    val displayLabel: String = "",      // 表示補助
+    var incidentId: String? = null,     // 紐付けられた IncidentLog ID
+    var segmentName: String = ""        // 発生時に録画中だったセグメント名
 )
 
-enum class IncidentStatus() {
-    PENDING(),   // セグメント退避・メディアスキャン中
-    SUCCESS(),       // 動画セグメントの保護・メディアスキャン完了
-    FAILED()         // エラー（ディスク満杯、ファイルコピー失敗等）
+enum class IncidentStatus {
+    PENDING,   // セグメント退避・メディアスキャン中
+    SUCCESS,       // 動画セグメントの保護・メディアスキャン完了
+    FAILED         // エラー（ディスク満杯、ファイルコピー失敗等）
 }
 
 data class IncidentLog(
@@ -41,13 +35,6 @@ data class IncidentLog(
     var coveredSegmentFiles: List<String> = emptyList(), // カバーする保護動画セグメントファイルパス一覧
     var status: IncidentStatus = IncidentStatus.PENDING,
     var failureReason: String? = null
-)
-
-data class EventCountSummary(
-    val decelerationCount: Int = 0,
-    val approachCount: Int = 0,
-    val collisionCount: Int = 0,
-    val soundCount: Int = 0
 )
 
 data class EventSensitivity(

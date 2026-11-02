@@ -1,11 +1,20 @@
 package jp.hisanet.charisafe.ui.main
 
 import android.content.Intent
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -13,29 +22,62 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
-import jp.hisanet.charisafe.data.debug.TraceLayer
-import jp.hisanet.charisafe.data.debug.TraceLogger
-import jp.hisanet.charisafe.data.debug.TraceMetric
-import jp.hisanet.charisafe.domain.model.*
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.*
+import androidx.core.net.toUri
+import jp.hisanet.charisafe.domain.model.ActiveCamera
+import jp.hisanet.charisafe.domain.model.EventType
+import jp.hisanet.charisafe.domain.model.IncidentLog
+import jp.hisanet.charisafe.domain.model.IncidentStatus
+import jp.hisanet.charisafe.domain.model.RecordingState
+import jp.hisanet.charisafe.domain.model.VideoResolution
+import jp.hisanet.charisafe.ui.component.EventMetricCard
+import jp.hisanet.charisafe.ui.model.EventUiConfig
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.time.Duration.Companion.milliseconds
-import androidx.core.net.toUri
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -143,15 +185,20 @@ fun MainScreen(
                 )
             }
         ) { innerPadding ->
-            Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
                 when (uiState.currentScreen) {
                     Screen.MAIN -> MainContent(viewModel, uiState)
-                    Screen.HISTORY -> HistoryContent(uiState, highlightedEventId, historyListState)
+                    Screen.HISTORY -> HistoryContent(uiState, historyListState)
                     Screen.RIDE_SUMMARY -> RideSummaryContent(
                         uiState,
                         onShowDeleteDialog = { showDeleteConfirmDialog = true },
                         onShowShareModal = { showShareModal = true }
                     )
+
                     Screen.SETTINGS -> SettingsContent(
                         viewModel = viewModel,
                         uiState = uiState
@@ -165,8 +212,19 @@ fun MainScreen(
     if (showDeleteConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirmDialog = false },
-            title = { Text("⚠️ 現在ライドのデータ削除", fontSize = 20.sp, fontWeight = FontWeight.Bold) },
-            text = { Text("現在のライドデータ（動画・ログ・サマリー）をすべて削除して初期状態に戻しますか？", fontSize = 16.sp) },
+            title = {
+                Text(
+                    "⚠️ 現在ライドのデータ削除",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    "現在のライドデータ（動画・ログ・サマリー）をすべて削除して初期状態に戻しますか？",
+                    fontSize = 16.sp
+                )
+            },
             confirmButton = {
                 Button(
                     onClick = {
@@ -190,16 +248,37 @@ fun MainScreen(
     if (showShareModal) {
         AlertDialog(
             onDismissRequest = { showShareModal = false },
-            title = { Text("📦 ライドデータを共有", fontSize = 20.sp, fontWeight = FontWeight.Bold) },
+            title = {
+                Text(
+                    "📦 ライドデータを共有",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = { viewModel.shareAllData(); showShareModal = false }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                    Button(
+                        onClick = { viewModel.shareAllData(); showShareModal = false },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    ) {
                         Text("すべて共有 (ZIP)", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
-                    Button(onClick = { viewModel.shareLogsOnly(); showShareModal = false }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                    Button(
+                        onClick = { viewModel.shareLogsOnly(); showShareModal = false },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    ) {
                         Text("ログのみ共有", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
-                    Button(onClick = { viewModel.shareVideosOnly(); showShareModal = false }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                    Button(
+                        onClick = { viewModel.shareVideosOnly(); showShareModal = false },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    ) {
                         Text("動画のみ共有", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -220,12 +299,17 @@ fun MainScreen(
             title = { Text("📦 ZIPファイル生成中", fontSize = 20.sp, fontWeight = FontWeight.Bold) },
             text = {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CircularProgressIndicator()
-                    Text("動画およびログを圧縮しています...\nしばらくお待ちください。", fontSize = 15.sp)
+                    Text(
+                        "動画およびログを圧縮しています...\nしばらくお待ちください。",
+                        fontSize = 15.sp
+                    )
                 }
             },
             confirmButton = {}
@@ -277,70 +361,30 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
             }
         }
 
-        // 2. 感度スライダー 4種 ＆ リアルタイム比較バー
+        // 2. 感度スライダー 4種 ＆ リアルタイム比較バー (共通 EventMetricCard ループ)
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // 接近
-                Column {
-                    android.util.Log.i("ApproachTrace","UI=${uiState.currentApproachScore}")
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(text = "接近 ${String.format(Locale.US, "%.1f", uiState.sensitivity.approachSensitivity)}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "${uiState.sessionEventCounts.approachCount}件", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                    ThresholdBar(
-                        currentValue = uiState.currentApproachScore,
-                        thresholdValue = uiState.sensitivity.approachSensitivity,
-                        onThresholdChanged = { viewModel.updateSensitivity(uiState.sensitivity.copy(approachSensitivity = it)) },
-                        minValue = 0f,
-                        maxValue = 20f
-                    )
-                }
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                uiState.eventMetricCards.forEach { metric ->
+                    EventMetricCard(
+                        metric = metric,
+                        onThresholdChanged = { newValue ->
+                            val updatedSensitivity = when (metric.eventType) {
+                                EventType.APPROACH -> uiState.sensitivity.copy(approachSensitivity = newValue)
+                                EventType.DECELERATION -> uiState.sensitivity.copy(
+                                    decelerationSensitivity = newValue
+                                )
 
-                // 減速
-                Column {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(text = "減速 ${String.format(Locale.US, "%.2f", uiState.sensitivity.decelerationSensitivity)} m/s²", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "${uiState.sessionEventCounts.decelerationCount}件", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                    ThresholdBar(
-                        currentValue = uiState.currentDecelValue,
-                        thresholdValue = uiState.sensitivity.decelerationSensitivity,
-                        onThresholdChanged = { viewModel.updateSensitivity(uiState.sensitivity.copy(decelerationSensitivity = it)) },
-                        minValue = 0f,
-                        maxValue = 2f
-                    )
-                }
-
-                // 衝撃
-                Column {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(text = "衝撃 ${String.format(Locale.US, "%.1f", uiState.sensitivity.collisionSensitivity)}G", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "${uiState.sessionEventCounts.collisionCount}件", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                    ThresholdBar(
-                        currentValue = uiState.currentGValue,
-                        thresholdValue = uiState.sensitivity.collisionSensitivity,
-                        onThresholdChanged = { viewModel.updateSensitivity(uiState.sensitivity.copy(collisionSensitivity = it)) },
-                        minValue = 0f,
-                        maxValue = 5f
-                    )
-                }
-
-                // 音量
-                Column {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(text = "音量 ${(uiState.sensitivity.soundSensitivity / 1.5f * 100).toInt()}%", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "${uiState.sessionEventCounts.soundCount}件", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                    ThresholdBar(
-                        currentValue = uiState.currentSoundAmplitude,
-                        thresholdValue = uiState.sensitivity.soundSensitivity,
-                        onThresholdChanged = { viewModel.updateSensitivity(uiState.sensitivity.copy(soundSensitivity = it)) },
-                        minValue = 0f,
-                        maxValue = 1.5f
+                                EventType.COLLISION -> uiState.sensitivity.copy(collisionSensitivity = newValue)
+                                EventType.SOUND -> uiState.sensitivity.copy(soundSensitivity = newValue)
+                            }
+                            viewModel.updateSensitivity(updatedSensitivity)
+                        }
                     )
                 }
             }
@@ -384,132 +428,25 @@ fun CameraShutterButton(isRecording: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * 統合 ThresholdBar (スライダー + リアルタイム比較バー + ピークホールド)
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ThresholdBar(
-    currentValue: Float,
-    thresholdValue: Float,
-    onThresholdChanged: (Float) -> Unit,
-    minValue: Float,
-    maxValue: Float,
-    enabled: Boolean = true,
-    enablePeakHold: Boolean = true,
-    peakDecayFactor: Float = 0.97f,
-    peakColor: Color = Color(0xFFFF9800),
-    peakStrokeWidth: Dp = 2.dp
-) {
-    // 異常値対策
-    val safeMin = if (minValue.isFinite()) minValue else 0f
-    val safeMax = if (maxValue.isFinite() && maxValue > safeMin) maxValue else (safeMin + 1f)
-    val range = safeMax - safeMin
-
-    val safeCurrentRaw = currentValue.takeIf { it.isFinite() } ?: safeMin
-    val safeCurrent = safeCurrentRaw.coerceIn(safeMin, safeMax)
-
-    val safeThresholdRaw = thresholdValue.takeIf { it.isFinite() } ?: safeMin
-    val safeThreshold = safeThresholdRaw.coerceIn(safeMin, safeMax)
-
-    val currentFraction = if (range > 0f) ((safeCurrent - safeMin) / range).coerceIn(0f, 1f) else 0f
-    val isExceeding = safeCurrent >= safeThreshold
-
-    // ピークホールド状態管理 (rememberUpdatedStateを活用して最新値を安全に参照)
-    var peakValue by remember { mutableFloatStateOf(0f) }
-    val currentValueState by rememberUpdatedState(safeCurrent)
-
-    LaunchedEffect(safeCurrent) {
-        if (safeCurrent > peakValue) {
-            peakValue = safeCurrent
-        }
-    }
-
-    LaunchedEffect(enablePeakHold) {
-        while (enablePeakHold) {
-            delay(50L.milliseconds)
-            peakValue = maxOf(currentValueState, peakValue * peakDecayFactor)
-        }
-    }
-
-    val context = LocalContext.current
-    val metric = when {
-        safeMax <= 1f -> TraceMetric.SOUND
-        safeMax <= 5f -> TraceMetric.COLLISION
-        else -> TraceMetric.APPROACH
-    }
-    TraceLogger.getInstance(context).log(metric, TraceLayer.UI, safeCurrent)
-
-    val activeTrackColor = if (isExceeding) Color.Red else MaterialTheme.colorScheme.primary
-    val inactiveTrackColor = Color.DarkGray
-
-    Slider(
-        value = safeThreshold,
-        onValueChange = onThresholdChanged,
-        valueRange = safeMin..safeMax,
-        enabled = enabled,
-        thumb = {
-            SliderDefaults.Thumb(
-                interactionSource = remember { MutableInteractionSource() },
-                colors = SliderDefaults.colors(thumbColor = Color.White)
-            )
-        },
-        track = {
-            Canvas(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(12.dp)
-            ) {
-                val w = size.width
-                val h = size.height
-                val cornerRadius = h / 2f
-
-                // 背景トラック
-                drawRoundRect(
-                    color = inactiveTrackColor,
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerRadius, cornerRadius)
-                )
-
-                // リアルタイム進捗トラック (現在値)
-                if (currentFraction > 0f) {
-                    drawRoundRect(
-                        color = activeTrackColor,
-                        size = androidx.compose.ui.geometry.Size(w * currentFraction, h),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerRadius, cornerRadius)
-                    )
-                }
-
-                // ピークホールド縦線 (オレンジ色の細線)
-                if (enablePeakHold && peakValue > safeMin) {
-                    val peakFraction = if (range > 0f) ((peakValue - safeMin) / range).coerceIn(0f, 1f) else 0f
-                    val peakX = w * peakFraction
-                    drawLine(
-                        color = peakColor,
-                        start = Offset(peakX, 0f),
-                        end = Offset(peakX, h),
-                        strokeWidth = peakStrokeWidth.toPx()
-                    )
-                }
-            }
-        }
-    )
-}
-
-/**
  * 📁 イベント履歴画面
  */
 @Composable
-fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState: androidx.compose.foundation.lazy.LazyListState) {
+fun HistoryContent(
+    uiState: MainUiState,
+    listState: androidx.compose.foundation.lazy.LazyListState
+) {
     val context = LocalContext.current
     val grouped = uiState.groupedTimelineItems
 
-    if (grouped.isEmpty()) {
+    if (grouped.isEmpty())
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("イベント履歴はありません", fontSize = 18.sp, color = Color.Gray)
-        }
-    } else {
+        } else
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().padding(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             grouped.forEach { (dateStr, items) ->
@@ -524,89 +461,142 @@ fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState:
                 }
                 items(items, key = {
                     when (it) {
-                        is TimelineItem.Recording -> it.incidentLog.id
-                        is TimelineItem.Detection -> it.detectionLog.id
+                        is TimelineItem.Recording -> "rec_${it.incidentLog.id}"
+                        is TimelineItem.Detection -> "det_${it.detectionLog.id}"
                     }
                 }) { item ->
-                    when (item) {
-                        is TimelineItem.Recording -> {
-                            val inc = item.incidentLog
-                            Card(
+                    if (item is TimelineItem.Recording) {
+                        val incidentLog = item.incidentLog
+                        var isExpanded by remember { mutableStateOf(false) }
+                        val associatedDetections =
+                            uiState.eventDetectionLogs.filter { it.incidentId == incidentLog.id }
+
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable {
-                                        val targetFile = resolveTargetFile(inc)
-                                        if (targetFile != null && targetFile.exists() && targetFile.length() > 0) {
-                                            try {
-                                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", targetFile)
-                                                val intent = Intent(Intent.ACTION_VIEW).apply {
-                                                    setDataAndType(uri, "video/mp4")
-                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                }
-                                                context.startActivity(intent)
-                                            } catch (e: Exception) {
-                                                android.util.Log.e("HistoryContent", "Failed to play video", e)
-                                                android.widget.Toast.makeText(context, "動画の再生に失敗しました: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
-                                            }
-                                        } else {
-                                            android.widget.Toast.makeText(context, "指定された動画ファイルが見つかりません（削除または移動済みの可能性があります）", android.widget.Toast.LENGTH_LONG).show()
-                                        }
-                                    },
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                            ) {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = "🎥 動画  ${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(inc.timestampMs))}",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    val statusText = if (inc.status == IncidentStatus.PENDING) " (保護中...)" else ""
-                                    Text(text = "トリガー: ${inc.triggerEventType.emoji} ${inc.triggerEventType.displayName}$statusText", fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
-                                }
-                            }
-                        }
-                        is TimelineItem.Detection -> {
-                            val det = item.detectionLog
-                            val isHighlighted = (det.id == highlightedEventId)
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        try {
-                                            val uri =
-                                                "https://maps.google.com/?q=${det.latitude},${det.longitude}".toUri()
-                                            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            }
-                                            context.startActivity(intent)
-                                        } catch (_: Exception) {}
-                                    },
-                                colors = CardDefaults.cardColors(
-                                    containerColor = if (isHighlighted) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surface
-                                ),
-                                elevation = CardDefaults.cardElevation(defaultElevation = if (isHighlighted) 6.dp else 2.dp)
+                                    .padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                    modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    val sensitivity = det.sensitivityLabel
-                                    val speedStr = String.format(Locale.US, "%.1f km/h", det.speedKmh)
-                                    val timeStr = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(det.timestampMs))
-                                    val displayText = "${det.eventType.emoji} ${det.eventType.displayName}  $timeStr  |  $sensitivity  |  $speedStr"
+                                    Column(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                val targetFile = resolveTargetFile(incidentLog)
+                                                if (targetFile != null && targetFile.exists() && targetFile.length() > 0) {
+                                                    try {
+                                                        val uri = FileProvider.getUriForFile(
+                                                            context,
+                                                            "${context.packageName}.fileprovider",
+                                                            targetFile
+                                                        )
+                                                        val intent =
+                                                            Intent(Intent.ACTION_VIEW).apply {
+                                                                setDataAndType(uri, "video/mp4")
+                                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                            }
+                                                        context.startActivity(intent)
+                                                    } catch (e: Exception) {
+                                                        android.util.Log.e(
+                                                            "HistoryContent",
+                                                            "Failed to play video",
+                                                            e
+                                                        )
+                                                        android.widget.Toast.makeText(
+                                                            context,
+                                                            "動画の再生に失敗しました: ${e.message}",
+                                                            android.widget.Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    }
+                                                } else {
+                                                    android.widget.Toast.makeText(
+                                                        context,
+                                                        "指定された動画ファイルが見つかりません（削除または移動済みの可能性があります）",
+                                                        android.widget.Toast.LENGTH_LONG
+                                                    ).show()
+                                                }
+                                            }
+                                    ) {
+                                        val statusText =
+                                            if (incidentLog.status == IncidentStatus.PENDING) "撮影中..." else "動画を再生"
+                                        Text(
+                                            text = "$statusText ${
+                                                SimpleDateFormat(
+                                                    "HH:mm:ss",
+                                                    Locale.US
+                                                ).format(Date(incidentLog.timestampMs))
+                                            }",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
 
-                                    Text(
-                                        text = displayText,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
+                                    TextButton(onClick = { isExpanded = !isExpanded }) {
+                                        Text(
+                                            text = if (isExpanded) "▲ 閉じる" else "▼ イベント(${associatedDetections.size})",
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                // 折りたたまれた子イベントリスト
+                                if (isExpanded && associatedDetections.isNotEmpty()) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        associatedDetections.forEach { detectionLog ->
+                                            val triggerStr =
+                                                if (detectionLog.id == incidentLog.triggerDetectionLogId) {
+                                                    "★"
+                                                } else {
+                                                    ""
+                                                }
+                                            val timeStr =
+                                                SimpleDateFormat("HH:mm:ss", Locale.US).format(
+                                                    Date(detectionLog.timestampMs)
+                                                )
+                                            val uiDef = EventUiConfig.get(detectionLog.eventType)
+                                            val valueStr =
+                                                if (detectionLog.detectedValue > 0f || detectionLog.thresholdValue > 0f) {
+                                                    EventUiConfig.formatMetricText(
+                                                        detectionLog.eventType,
+                                                        detectionLog.detectedValue,
+                                                        detectionLog.thresholdValue
+                                                    )
+                                                } else detectionLog.displayLabel.ifEmpty {
+                                                    "-"
+                                                }
+                                            val displayText =
+                                                "$triggerStr${uiDef.emoji} ${uiDef.displayName}  $timeStr  |  $valueStr"
+
+                                            Text(
+                                                text = displayText,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 16.sp,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.clickable {
+                                                    try {
+                                                        val uri =
+                                                            "https://maps.google.com/?q=${detectionLog.latitude},${detectionLog.longitude}".toUri()
+                                                        val intent =
+                                                            Intent(Intent.ACTION_VIEW, uri).apply {
+                                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                            }
+                                                        context.startActivity(intent)
+                                                    } catch (_: Exception) {
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -614,7 +604,6 @@ fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState:
                 }
             }
         }
-    }
 }
 
 /**
@@ -622,10 +611,10 @@ fun HistoryContent(uiState: MainUiState, highlightedEventId: String?, listState:
  */
 @Composable
 fun RideSummaryContent(
-        uiState: MainUiState,
-        onShowDeleteDialog: () -> Unit,
-        onShowShareModal: () -> Unit
-    ) {
+    uiState: MainUiState,
+    onShowDeleteDialog: () -> Unit,
+    onShowShareModal: () -> Unit
+) {
     val target = uiState.currentRideSummary
 
     if (target == null) {
@@ -639,66 +628,146 @@ fun RideSummaryContent(
         val stoppedSec = target.stoppedTimeSec % 60
 
         Column(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
-                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(text = "走行時間: ${movingMin}分 ${movingSec}秒", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text(text = "停止時間: ${stoppedMin}分 ${stoppedSec}秒", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    
-                    Text(text = "総距離: ${String.format(Locale.US, "%.2f", target.totalDistanceKm)} km", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    
-                    Text(text = "平均速度: ${String.format(Locale.US, "%.1f", target.averageSpeedKmh)} km/h", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text(text = "最高速度: ${String.format(Locale.US, "%.1f", target.maxSpeedKmh)} km/h", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "走行時間: ${movingMin}分 ${movingSec}秒",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "停止時間: ${stoppedMin}分 ${stoppedSec}秒",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
 
-                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                        Text(text = "🚗 接近: ${target.eventCounts.approachCount}件 ${
+                    Text(
+                        text = "総距離: ${
+                            String.format(
+                                Locale.US,
+                                "%.2f",
+                                target.totalDistanceKm
+                            )
+                        } km", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White
+                    )
+
+                    Text(
+                        text = "平均速度: ${
                             String.format(
                                 Locale.US,
                                 "%.1f",
-                                target.approachPerHour
+                                target.averageSpeedKmh
                             )
-                        } 件/h", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                        Text(text = "⚠ 減速: ${target.eventCounts.decelerationCount}件 ${
+                        } km/h", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White
+                    )
+                    Text(
+                        text = "最高速度: ${
                             String.format(
                                 Locale.US,
                                 "%.1f",
-                                target.decelerationPerHour
+                                target.maxSpeedKmh
                             )
-                        } 件/h", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        } km/h", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White
+                    )
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "🚗 接近: ${target.eventCounts.approachCount}件 ${
+                                String.format(
+                                    Locale.US,
+                                    "%.1f",
+                                    target.approachPerHour
+                                )
+                            } 件/h",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
                     }
-                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                        Text(text = "💥 衝撃: ${target.eventCounts.collisionCount}件 ${
-                            String.format(
-                                Locale.US,
-                                "%.1f",
-                                target.collisionPerHour
-                            )
-                        } 件/h", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "⚠ 減速: ${target.eventCounts.decelerationCount}件 ${
+                                String.format(
+                                    Locale.US,
+                                    "%.1f",
+                                    target.decelerationPerHour
+                                )
+                            } 件/h",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
                     }
-                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                        Text(text = "🔊 音量: ${target.eventCounts.soundCount}件 ${
-                            String.format(
-                                Locale.US,
-                                "%.1f",
-                                target.soundPerHour
-                            )
-                        } 件/h", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "💥 衝撃: ${target.eventCounts.collisionCount}件 ${
+                                String.format(
+                                    Locale.US,
+                                    "%.1f",
+                                    target.collisionPerHour
+                                )
+                            } 件/h",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
                     }
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "🔊 音量: ${target.eventCounts.soundCount}件 ${
+                                String.format(
+                                    Locale.US,
+                                    "%.1f",
+                                    target.soundPerHour
+                                )
+                            } 件/h",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
                         Column(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Button(
                                 onClick = onShowShareModal,
-                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
                             ) {
                                 Text("共有", fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -706,7 +775,9 @@ fun RideSummaryContent(
                             Button(
                                 onClick = onShowDeleteDialog,
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                                modifier = Modifier.fillMaxWidth().height(48.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
                             ) {
                                 Text("削除", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             }
@@ -753,49 +824,105 @@ fun SettingsContent(
 
         // 1. 撮影設定
         Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(text = "撮影設定 (Camera & Resolution)", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White)
-                
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Text(
+                    text = "撮影設定 (Camera & Resolution)",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = Color.White
+                )
+
                 // アクティブカメラ
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text("アクティブカメラ", fontSize = 16.sp, color = Color.White)
                     var cameraExpanded by remember { mutableStateOf(false) }
                     Box {
-                        OutlinedButton(onClick = { cameraExpanded = true }, enabled = !isRecording) {
-                            Text(if (config.activeCamera == ActiveCamera.REAR) "後方(リア)" else "前方(フロント)", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        OutlinedButton(
+                            onClick = { cameraExpanded = true },
+                            enabled = !isRecording
+                        ) {
+                            Text(
+                                if (config.activeCamera == ActiveCamera.REAR) "後方(リア)" else "前方(フロント)",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
                         }
-                        DropdownMenu(expanded = cameraExpanded, onDismissRequest = { cameraExpanded = false }) {
-                            DropdownMenuItem(text = { Text("後方(リア)", fontSize = 16.sp) }, onClick = { viewModel.updateActiveCamera(ActiveCamera.REAR); cameraExpanded = false })
-                            DropdownMenuItem(text = { Text("前方(フロント)", fontSize = 16.sp) }, onClick = { viewModel.updateActiveCamera(ActiveCamera.FRONT); cameraExpanded = false })
+                        DropdownMenu(
+                            expanded = cameraExpanded,
+                            onDismissRequest = { cameraExpanded = false }) {
+                            DropdownMenuItem(
+                                text = { Text("後方(リア)", fontSize = 16.sp) },
+                                onClick = {
+                                    viewModel.updateActiveCamera(ActiveCamera.REAR); cameraExpanded =
+                                    false
+                                })
+                            DropdownMenuItem(
+                                text = { Text("前方(フロント)", fontSize = 16.sp) },
+                                onClick = {
+                                    viewModel.updateActiveCamera(ActiveCamera.FRONT); cameraExpanded =
+                                    false
+                                })
                         }
                     }
                 }
 
                 // フレームレート (FPS)
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text("フレームレート (FPS)", fontSize = 16.sp, color = Color.White)
                     var fpsExpanded by remember { mutableStateOf(false) }
                     Box {
                         OutlinedButton(onClick = { fpsExpanded = true }, enabled = !isRecording) {
-                            Text("${config.fps} fps", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(
+                                "${config.fps} fps",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
                         }
-                        DropdownMenu(expanded = fpsExpanded, onDismissRequest = { fpsExpanded = false }) {
+                        DropdownMenu(
+                            expanded = fpsExpanded,
+                            onDismissRequest = { fpsExpanded = false }) {
                             listOf(5, 10, 15).forEach { f ->
-                                DropdownMenuItem(text = { Text("$f fps", fontSize = 16.sp) }, onClick = { viewModel.updateFps(f); fpsExpanded = false })
+                                DropdownMenuItem(
+                                    text = { Text("$f fps", fontSize = 16.sp) },
+                                    onClick = { viewModel.updateFps(f); fpsExpanded = false })
                             }
                         }
                     }
                 }
 
                 // 録画解像度 (640x480, 1280x720, 1920x1080 選択可能)
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text("録画解像度", fontSize = 16.sp, color = Color.White)
                     var resExpanded by remember { mutableStateOf(false) }
                     Box {
                         OutlinedButton(onClick = { resExpanded = true }, enabled = !isRecording) {
-                            Text("${config.resolution.width}x${config.resolution.height}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(
+                                "${config.resolution.width}x${config.resolution.height}",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
                         }
-                        DropdownMenu(expanded = resExpanded, onDismissRequest = { resExpanded = false }) {
+                        DropdownMenu(
+                            expanded = resExpanded,
+                            onDismissRequest = { resExpanded = false }) {
                             VideoResolution.entries.forEach { res ->
                                 DropdownMenuItem(
                                     text = { Text("${res.width}x${res.height}", fontSize = 16.sp) },
@@ -812,30 +939,56 @@ fun SettingsContent(
                 HorizontalDivider()
 
                 // リングバッファ時間
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text("リングバッファ保持時間", fontSize = 16.sp, color = Color.White)
                     var rbExpanded by remember { mutableStateOf(false) }
                     Box {
                         OutlinedButton(onClick = { rbExpanded = true }, enabled = !isRecording) {
-                            Text("${config.ringBufferMinutes} 分", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(
+                                "${config.ringBufferMinutes} 分",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
                         }
-                        DropdownMenu(expanded = rbExpanded, onDismissRequest = { rbExpanded = false }) {
+                        DropdownMenu(
+                            expanded = rbExpanded,
+                            onDismissRequest = { rbExpanded = false }) {
                             listOf(3, 5, 10).forEach { min ->
-                                DropdownMenuItem(text = { Text("$min 分", fontSize = 16.sp) }, onClick = { viewModel.updateRingBuffer(min); rbExpanded = false })
+                                DropdownMenuItem(
+                                    text = { Text("$min 分", fontSize = 16.sp) },
+                                    onClick = {
+                                        viewModel.updateRingBuffer(min); rbExpanded = false
+                                    })
                             }
                         }
                     }
                 }
 
                 // GPS記録間隔 (1秒を追加)
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text("GPS記録間隔", fontSize = 16.sp, color = Color.White)
                     var gpsExpanded by remember { mutableStateOf(false) }
                     Box {
                         OutlinedButton(onClick = { gpsExpanded = true }, enabled = !isRecording) {
-                            Text("${config.gpsIntervalSeconds} 秒", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(
+                                "${config.gpsIntervalSeconds} 秒",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
                         }
-                        DropdownMenu(expanded = gpsExpanded, onDismissRequest = { gpsExpanded = false }) {
+                        DropdownMenu(
+                            expanded = gpsExpanded,
+                            onDismissRequest = { gpsExpanded = false }) {
                             listOf(1L, 5L, 10L, 30L, 60L).forEach { sec ->
                                 DropdownMenuItem(
                                     text = { Text("$sec 秒", fontSize = 16.sp) },

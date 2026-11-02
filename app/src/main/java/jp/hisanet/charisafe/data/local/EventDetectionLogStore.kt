@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import jp.hisanet.charisafe.data.location.LocationTracker
 import jp.hisanet.charisafe.domain.model.EventDetectionLog
-import jp.hisanet.charisafe.domain.model.EventSensitivity
 import jp.hisanet.charisafe.domain.model.EventType
 import jp.hisanet.charisafe.util.FileUtils
 import org.json.JSONArray
@@ -34,8 +33,9 @@ object EventDetectionLogStore {
                     put("speedKmh", log.speedKmh.toDouble())
                     put("latitude", log.latitude)
                     put("longitude", log.longitude)
-                    put("sensitivityValue", log.sensitivityValue.toDouble())
-                    put("sensitivityLabel", log.sensitivityLabel)
+                    put("detectedValue", log.detectedValue.toDouble())
+                    put("thresholdValue", log.thresholdValue.toDouble())
+                    put("displayLabel", log.displayLabel)
                     put("incidentId", log.incidentId ?: "")
                 }
                 jsonArray.put(obj)
@@ -70,6 +70,24 @@ object EventDetectionLogStore {
                 val typeStr = obj.optString("eventType", EventType.APPROACH.name)
                 val eventType = try { EventType.valueOf(typeStr) } catch (e: Exception) { EventType.APPROACH }
 
+                val detectedVal = if (obj.has("detectedValue")) {
+                    obj.optDouble("detectedValue", 0.0).toFloat()
+                } else {
+                    obj.optDouble("sensitivityValue", 0.0).toFloat()
+                }
+
+                val thresholdVal = if (obj.has("thresholdValue")) {
+                    obj.optDouble("thresholdValue", 0.0).toFloat()
+                } else {
+                    obj.optDouble("sensitivityValue", 0.0).toFloat()
+                }
+
+                val label = if (obj.has("displayLabel")) {
+                    obj.optString("displayLabel", "")
+                } else {
+                    obj.optString("sensitivityLabel", "")
+                }
+
                 val log = EventDetectionLog(
                     id = obj.optString("id", java.util.UUID.randomUUID().toString()),
                     timestampMs = obj.optLong("timestampMs", System.currentTimeMillis()),
@@ -77,8 +95,9 @@ object EventDetectionLogStore {
                     speedKmh = obj.optDouble("speedKmh", 0.0).toFloat(),
                     latitude = obj.optDouble("latitude", LocationTracker.lastValidLatitude),
                     longitude = obj.optDouble("longitude", LocationTracker.lastValidLongitude),
-                    sensitivityValue = obj.optDouble("sensitivityValue", 0.7).toFloat(),
-                    sensitivityLabel = obj.optString("sensitivityLabel", ""),
+                    detectedValue = detectedVal,
+                    thresholdValue = thresholdVal,
+                    displayLabel = label,
                     incidentId = obj.optString("incidentId", "").takeIf { it.isNotEmpty() }
                 )
                 list.add(log)
