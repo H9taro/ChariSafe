@@ -25,7 +25,6 @@ class SpeedDecelerationDetector(
 
     private var smoothedSpeedMs: Float = -1f
     private var lastTimestampMs: Long = 0L
-    private var consecutiveCount: Int = 0
 
     @Synchronized
     fun feedPoint(point: GpxPoint) {
@@ -53,15 +52,8 @@ class SpeedDecelerationDetector(
         _decelerationState.value = deceleration.coerceAtLeast(0f)
         Log.d(TAG, "📊 [Trace] deceleration: ${deceleration.coerceAtLeast(0f)} m/s^2")
 
-        // 3. 継続判定（連続2回以上の超過でノイズカット）
-        val isExceeding = deceleration >= thresholdMs2
-        if (isExceeding) {
-            consecutiveCount++
-        } else {
-            consecutiveCount = (consecutiveCount - 1).coerceAtLeast(0)
-        }
-
-        val triggered = consecutiveCount >= 2
+        // 画面バー超過と完全に同期した発報条件
+        val triggered = deceleration >= thresholdMs2
 
         decelerationDebugLogger?.log(
             oldestSpeedKmh = prevSmoothed * 3.6f,
@@ -76,8 +68,7 @@ class SpeedDecelerationDetector(
         lastTimestampMs = now
 
         if (triggered) {
-            Log.w(TAG, "🚨 [減速検知] 加速度 ${String.format(java.util.Locale.US, "%.2f", deceleration)} m/s^2 (閾値: ${thresholdMs2} m/s^2) を連続検知!")
-            consecutiveCount = 0
+            Log.w(TAG, "🚨 [減速検知] 加速度 ${String.format(java.util.Locale.US, "%.2f", deceleration)} m/s^2 (閾値: ${thresholdMs2} m/s^2) を検知!")
             onDecelerationDetected()
         }
     }

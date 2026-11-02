@@ -317,29 +317,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 loadExistingEvents()
             }
         }
-        val gpxImpl = gpxRepository as? GpxRepositoryImpl
-        gpxImpl?.onDecelerationDetected = {
-            Log.w(TAG, "🚨 [Priority1] 減速検知トリガー受領")
-            val sens = _sensitivity.value.decelerationSensitivity
-            val currentPoint = gpxRepository.currentGpxPoint.value
-            val lat = currentPoint?.latitude ?: jp.hisanet.charisafe.data.location.LocationTracker.lastValidLatitude
-            val lon = currentPoint?.longitude ?: jp.hisanet.charisafe.data.location.LocationTracker.lastValidLongitude
-            val speed = currentPoint?.speedKmh ?: jp.hisanet.charisafe.data.location.LocationTracker.lastValidSpeedKmh
-
-            val currentDecel = gpxRepository.decelerationState.value
-            val detectionLog = EventDetectionLog(
-                timestampMs = System.currentTimeMillis(),
-                eventType = EventType.DECELERATION,
-                speedKmh = speed,
-                latitude = lat,
-                longitude = lon,
-                detectedValue = currentDecel,
-                thresholdValue = sens,
-                displayLabel = "${String.format(Locale.US, "%.2f", currentDecel)} / ${String.format(Locale.US, "%.2f", sens)} m/s²"
-            )
-            eventLogRepository.addDetectionLog(detectionLog)
-            loadExistingEvents()
-        }
 
         viewModelScope.launch {
             gpxRepository.currentGpxPoint.collect { point ->

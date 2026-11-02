@@ -124,6 +124,7 @@ class RecordingService : Service(), LifecycleOwner {
     private var ringBufferManager: RingBufferManager? = null
     private var rearApproachDetector: RearApproachDetector? = null
     private var collisionDropDetector: CollisionDropDetector? = null
+    private var serviceGpxRepo: jp.hisanet.charisafe.data.repository.GpxRepositoryImpl? = null
 
     private val _soundAmplitudeState = MutableStateFlow(0f)
     private val _approachScoreState = MutableStateFlow(0f)
@@ -201,6 +202,21 @@ class RecordingService : Service(), LifecycleOwner {
                 displayLabel = "${String.format(Locale.US, "%.2f", detectedG)} / ${String.format(Locale.US, "%.2f", sens)} G"
             )
         }
+
+        val decelerationDebugLogger = jp.hisanet.charisafe.data.debug.DecelerationDebugLogger(this)
+        val gpxRepo = jp.hisanet.charisafe.data.repository.GpxRepositoryImpl(this, decelerationDebugLogger)
+        gpxRepo.onDecelerationDetected = {
+            val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
+            val sens = prefs.getFloat("key_decel_sensitivity", 1.5f)
+            val detectedDecel = gpxRepo.decelerationState.value
+            handleDetectedEvent(
+                EventType.DECELERATION,
+                detectedValue = detectedDecel,
+                thresholdValue = sens,
+                displayLabel = "${String.format(Locale.US, "%.2f", detectedDecel)} / ${String.format(Locale.US, "%.2f", sens)} m/s²"
+            )
+        }
+        serviceGpxRepo = gpxRepo
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -241,12 +257,14 @@ class RecordingService : Service(), LifecycleOwner {
                 startForegroundWithNotification()
                 acquireWakeLock()
                 collisionDropDetector?.startListening()
+                serviceGpxRepo?.startLogging(1L)
                 startRecordingPipeline()
                 startSegmentRotationTimer()
             }
 
             ACTION_STOP_RECORDING -> {
                 collisionDropDetector?.stopListening()
+                serviceGpxRepo?.stopLogging()
                 serviceScope.launch {
                     stopRecordingPipeline()
                     stopForegroundAndSelf()
