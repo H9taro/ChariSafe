@@ -568,12 +568,14 @@ fun HistoryContent(
                                         )
                                     }
 
-                                    TextButton(onClick = { isExpanded = !isExpanded }) {
-                                        Text(
-                                            text = if (isExpanded) "▲ 閉じる" else "▼ イベント(${associatedDetections.size})",
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
+                                    if (associatedDetections.isNotEmpty()) {
+                                        TextButton(onClick = { isExpanded = !isExpanded }) {
+                                            Text(
+                                                text = if (isExpanded) "▲ 閉じる" else "▼ イベント(${associatedDetections.size})",
+                                                fontSize = 16.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
                                     }
                                 }
 

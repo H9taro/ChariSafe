@@ -225,6 +225,7 @@ flowchart TD
 - 履歴画面（`HistoryScreen` / `groupedTimelineItems`）のトップレベルリストには、**`TimelineItem.Recording`（動画インシデントカード）のみ** が登録される。
 - 従来の `TimelineItem.Detection`（単体イベントのトップレベル独立リスト混入）は、空白スペース（空欄表示）の発生原因となるため廃止されている。
 - すべての検知イベント（`EventDetectionLog`）は、対応する動画インシデントの `uiState.eventDetectionLogs.filter { it.incidentId == incidentLog.id }` として親カード内の折りたたみツリー（子要素）としてのみ描画される。
+- `associatedDetections.isNotEmpty()`（関連イベントが 1 件以上存在する場合）のみ、「▼ イベント(N件)」トグルボタンを描画する。関連イベントが 0 件の動画カードでは、無意味な展開ボタンは非表示（非描画）とする。
 
 ### 11.2 通知タップ時の自動スクロール (Focus & Scroll) 仕様
 - 録画完了通知のタップ時に起動インテントから `EXTRA_TARGET_EVENT_ID` が渡された場合、`MainViewModel` が `targetEventIdToHighlight` をセットし、画面を `Screen.HISTORY` に切り替える。
