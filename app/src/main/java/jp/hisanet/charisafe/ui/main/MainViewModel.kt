@@ -175,10 +175,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // ホーム画面の件数も履歴と完全に一致させるため totalCounts を同期
         val sessionCounts = totalCounts
 
-        // タイムライン構築＆日付グルーピング (降順)
+        // タイムライン構築＆日付グルーピング (降順) - 完全な動画中心モデルとして Recording のみを対象とする
         val timeline = mutableListOf<TimelineItem>()
         incidents.forEach { timeline.add(TimelineItem.Recording(it)) }
-        detections.forEach { timeline.add(TimelineItem.Detection(it)) }
         val sortedTimeline = timeline.sortedByDescending { it.timestampMs }
 
         val dateFormatter = SimpleDateFormat("yyyy-MM-dd", Locale.US)

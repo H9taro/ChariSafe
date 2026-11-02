@@ -221,6 +221,11 @@ flowchart TD
 | **`RideSummaryStore`** | `List<RideSummary>` | `logs/ride_summaries.json` | `MainViewModel` | `MainViewModel` |
 | **`RingBufferManager`** | 動画セグメント (`.mp4`) | `ringbuffer/seg_*.mp4`<br>(保護時: `recordings/`) | `RecordingService` | `RecordingService`, `RecordingRepositoryImpl` |
 
+### 11.1 履歴タイムラインの構造仕様 (Video-Centric Timeline)
+- 履歴画面（`HistoryScreen` / `groupedTimelineItems`）のトップレベルリストには、**`TimelineItem.Recording`（動画インシデントカード）のみ** が登録される。
+- 従来の `TimelineItem.Detection`（単体イベントのトップレベル独立リスト混入）は、空白スペース（空欄表示）の発生原因となるため廃止されている。
+- すべての検知イベント（`EventDetectionLog`）は、対応する動画インシデントの `uiState.eventDetectionLogs.filter { it.incidentId == incidentLog.id }` として親カード内の折りたたみツリー（子要素）としてのみ描画される。
+
 ---
 
 ## 12. 画面状態およびサービス内部状態構造定義
