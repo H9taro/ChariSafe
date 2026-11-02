@@ -599,6 +599,25 @@ class RecordingService : Service(), LifecycleOwner {
                         )
                         coveredFiles.add(destFile.absolutePath)
 
+                        // 前世代動画用の独立した IncidentLog レコードを生成・保存
+                        val prevIncident = IncidentLog(
+                            timestampMs = previousCompletedFile.lastModified(),
+                            triggerEventType = eventType,
+                            triggerDetectionLogId = detectionLog.id,
+                            relatedDetectionIds = emptyList(),
+                            highestSeverityType = eventType,
+                            latitude = lat,
+                            longitude = lon,
+                            videoFilePath = destFile.absolutePath,
+                            coveredSegmentFiles = listOf(destFile.absolutePath),
+                            status = IncidentStatus.SUCCESS
+                        )
+                        val allIncidents = IncidentLogStore.loadIncidents(this@RecordingService).toMutableList()
+                        allIncidents.add(0, prevIncident)
+                        IncidentLogStore.saveIncidents(this@RecordingService, allIncidents)
+                        Log.i(TAG, "✨ [保護動画中心モデル] 前世代動画の独立IncidentLog生成・保存完了: ${prevIncident.id}")
+                        showRecordingCompletionNotification(prevIncident)
+
                         traceLogger.logProtectionTrace(
                             SegmentProtectionTraceEntry(
                                 segmentName = prevSeg.segmentName,
