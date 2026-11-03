@@ -94,6 +94,7 @@ fun MainScreen(
 
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var showShareModal by remember { mutableStateOf(false) }
+    val isRecording = uiState.status.state == RecordingState.RECORDING
 
     LaunchedEffect(uiState.targetEventIdToHighlight) {
         val targetId = uiState.targetEventIdToHighlight
@@ -232,6 +233,7 @@ fun MainScreen(
                         viewModel.deleteCurrentRide()
                         showDeleteConfirmDialog = false
                     },
+                    enabled = !isRecording,
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
                     Text("削除実行", fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -260,6 +262,7 @@ fun MainScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
                         onClick = { viewModel.shareAllData(); showShareModal = false },
+                        enabled = !isRecording,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
@@ -268,6 +271,7 @@ fun MainScreen(
                     }
                     Button(
                         onClick = { viewModel.shareLogsOnly(); showShareModal = false },
+                        enabled = !isRecording,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
@@ -276,6 +280,7 @@ fun MainScreen(
                     }
                     Button(
                         onClick = { viewModel.shareVideosOnly(); showShareModal = false },
+                        enabled = !isRecording,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
@@ -790,27 +795,30 @@ fun RideSummaryContent(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
+                        val isRecording = uiState.status.state == RecordingState.RECORDING
                         Column(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Button(
                                 onClick = onShowShareModal,
+                                enabled = !isRecording,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(48.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
                             ) {
-                                Text("共有", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Text(if (isRecording) "共有 (録画中は不可)" else "共有", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             }
                             Button(
                                 onClick = onShowDeleteDialog,
+                                enabled = !isRecording,
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(48.dp)
                             ) {
-                                Text("削除", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Text(if (isRecording) "削除 (録画中は不可)" else "削除", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }

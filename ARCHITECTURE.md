@@ -332,8 +332,9 @@ flowchart TD
 - **有効性判定の緩和**: 厳格すぎる `totalDistanceKm > 0.0 && movingTimeSec > 0L` 条件を廃止し、タイムスタンプが正当であること（`endTimeMs > startTimeMs`）を基本条件とする。
 - **トレーサビリティログ**: `RideSummaryStore` および `MainViewModel` におけるライドサマリファイルの読み込み（Read）、書き込み（Write）の全挙動は、`TraceLogger` により `trace_*.log` へ記録される。
 
-### 14.2 デバッグ・ログ共有 ZIP エクスポート仕様
+### 14.2 デバッグ・ログ共有 ZIP エクスポート ＆ アクション制御仕様 (`261103-10`)
 - `createAndShareZip()` において、`files/debug/` および `files/recordings/` に加え、`files/logs/`（`incident_logs.json`, `event_detection_logs.json`, `ride_summaries.json` 等）のすべての JSON ログファイルを ZIP アーカイブへ明示的に同梱する。
+- **録画中のアクションボタン制御**: 動画録画中（`RecordingState.RECORDING`）は、データ全削除および共有 ZIP 生成アクションのボタンが `enabled = !isRecording` により自動無効化（Disabled）され、進行中ファイルへの不整合アクセスや誤消去を保護防止する。
 
 ---
 
