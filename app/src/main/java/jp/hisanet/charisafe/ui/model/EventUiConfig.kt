@@ -24,7 +24,7 @@ object EventUiConfig {
                     format = "%.2f",
                     unitName = " m/s²",
                     sliderMin = 0f,
-                    sliderMax = 5f
+                    sliderMax = 3f
                 )
 
             EventType.COLLISION ->
@@ -33,7 +33,7 @@ object EventUiConfig {
                     emoji = "💥",
                     format = "%.2f",
                     unitName = " G",
-                    sliderMin = 0f,
+                    sliderMin = 1f,
                     sliderMax = 5f
                 )
 
