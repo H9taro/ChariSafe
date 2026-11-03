@@ -292,7 +292,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             sessionEventCounts = totalCounts,
             eventCounts = totalCounts,
             sensitivity = sensitivity,
-            currentRideSummary = liveSummary,
+            currentRideSummary = if ((liveSummary?.totalDistanceKm ?: 0.0) > 0.0) liveSummary else summaries.firstOrNull(),
             currentApproachScore = approachVal,
             currentDecelValue = decelVal,
             currentGValue = gVal,
@@ -307,7 +307,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         loadExistingEvents()
-        loadRideSummaries()
+        syncAndRecalculateRideSummaries()
 
         // 定期的にイベント履歴およびインシデントを自動リロードしてUIにリアルタイム反映
         viewModelScope.launch {
@@ -344,19 +344,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 val gpxFiles = gpxDir.listFiles { _, name -> name.endsWith(".gpx") }?.sortedBy { it.lastModified() } ?: return@launch
                 val currentSummaries = RideSummaryStore.loadSummaries(context).toMutableList()
+                // gpxFileName が空文字のゴミレコードを自動クリーンアップ
+                currentSummaries.removeAll { it.gpxFileName.isEmpty() }
+
                 val detections = jp.hisanet.charisafe.data.local.EventDetectionLogStore.loadLogs(context)
                 val activeGpxPath = gpxRepository.getActiveGpxFilePath()
-
-                var updated = false
 
                 for (file in gpxFiles) {
                     val fileName = file.name
                     val existingIndex = currentSummaries.indexOfFirst { it.gpxFileName == fileName }
                     val existing = if (existingIndex >= 0) currentSummaries[existingIndex] else null
-
-                    if (existing != null && existing.isCompleted) {
-                        continue
-                    }
 
                     val points = readGpxPoints(file)
                     if (points.isEmpty()) continue
@@ -431,14 +428,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         currentSummaries.add(0, summary)
                     }
-                    updated = true
                 }
 
-                if (updated) {
-                    val sorted = currentSummaries.sortedByDescending { it.startTimeMs }
+                val validSummaries = currentSummaries.filter { it.endTimeMs > it.startTimeMs }
+                if (validSummaries.isNotEmpty()) {
+                    val sorted = validSummaries.sortedByDescending { it.startTimeMs }
                     RideSummaryStore.saveSummaries(context, sorted)
                     withContext(Dispatchers.Main) {
                         _rideSummaries.value = sorted
+                    }
+                } else {
+                    val existingLoaded = RideSummaryStore.loadSummaries(context)
+                    if (existingLoaded.isNotEmpty()) {
+                        withContext(Dispatchers.Main) {
+                            _rideSummaries.value = existingLoaded.sortedByDescending { it.startTimeMs }
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -487,13 +491,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopRecording() {
+        val activePathBeforeStop = gpxRepository.getActiveGpxFilePath()
+        val gpxFileNameBeforeStop = if (activePathBeforeStop != null) File(activePathBeforeStop).name else {
+            val gpxDir = jp.hisanet.charisafe.util.FileUtils.getGpxDir(getApplication())
+            gpxDir.listFiles { _, name -> name.endsWith(".gpx") }?.sortedByDescending { it.lastModified() }?.firstOrNull()?.name ?: ""
+        }
+
         recordingRepository.stopRecording()
         gpxRepository.stopLogging()
 
         val rideEndTimeMs = System.currentTimeMillis()
         val totalDurationSec = if (rideStartTimeMs > 0) (rideEndTimeMs - rideStartTimeMs) / 1000L else 0L
 
-        val pointsCopy = synchronized(recordedPoints) { recordedPoints.toList() }
+        var pointsCopy = synchronized(recordedPoints) { recordedPoints.toList() }
+        if (pointsCopy.isEmpty()) {
+            val fileToRead = if (activePathBeforeStop != null && File(activePathBeforeStop).exists()) {
+                File(activePathBeforeStop)
+            } else {
+                val gpxDir = jp.hisanet.charisafe.util.FileUtils.getGpxDir(getApplication())
+                gpxDir.listFiles { _, name -> name.endsWith(".gpx") }?.sortedByDescending { it.lastModified() }?.firstOrNull()
+            }
+            if (fileToRead != null) {
+                pointsCopy = readGpxPoints(fileToRead)
+            }
+        }
         var totalDistKm = 0.0
         var maxSpd = 0f
         var speedSum = 0f
@@ -535,6 +556,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         val summary = RideSummary(
+            gpxFileName = gpxFileNameBeforeStop,
+            isCompleted = true,
+            lastAggregatedTimestampMs = rideEndTimeMs,
             startTimeMs = rideStartTimeMs,
             endTimeMs = rideEndTimeMs,
             movingTimeSec = movingSec,
@@ -671,40 +695,78 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun parseIso8601Time(timeStr: String): Long {
+        val formats = listOf(
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") },
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") },
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") },
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+        )
+        for (sdf in formats) {
+            try {
+                val date = sdf.parse(timeStr)
+                if (date != null) return date.time
+            } catch (_: Exception) {}
+        }
+        return timeStr.toLongOrNull() ?: 0L
+    }
+
     private fun readGpxPoints(file: File): List<GpxPoint> {
         val points = mutableListOf<GpxPoint>()
         try {
             if (!file.exists()) return points
-            val dbf = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+            val dbf = javax.xml.parsers.DocumentBuilderFactory.newInstance().apply {
+                isNamespaceAware = false
+                isIgnoringComments = true
+            }
             val db = dbf.newDocumentBuilder()
             val doc = db.parse(file)
-            val trkpts = doc.getElementsByTagName("trkpt")
-            for (i in 0 until trkpts.length) {
-                val node = trkpts.item(i)
+            val allElements = doc.getElementsByTagName("*")
+            for (i in 0 until allElements.length) {
+                val node = allElements.item(i)
                 if (node.nodeType == org.w3c.dom.Node.ELEMENT_NODE) {
                     val element = node as org.w3c.dom.Element
-                    val lat = element.getAttribute("lat").toDoubleOrNull() ?: 0.0
-                    val lon = element.getAttribute("lon").toDoubleOrNull() ?: 0.0
-                    var speedKmh = 0f
-                    var timeMs = 0L
+                    val nodeName = element.nodeName.lowercase(Locale.US)
+                    if (nodeName.endsWith("trkpt") || element.localName?.lowercase(Locale.US) == "trkpt") {
+                        val lat = element.getAttribute("lat").toDoubleOrNull() ?: 0.0
+                        val lon = element.getAttribute("lon").toDoubleOrNull() ?: 0.0
+                        var speedKmh = 0f
+                        var timeMs = 0L
 
-                    val speedElem = element.getElementsByTagName("speed").item(0)
-                    if (speedElem != null) {
-                        speedKmh = speedElem.textContent.toFloatOrNull() ?: 0f
-                    }
-                    val timeElem = element.getElementsByTagName("time").item(0)
-                    if (timeElem != null) {
-                        val timeStr = timeElem.textContent
-                        try {
-                            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-                            sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
-                            timeMs = sdf.parse(timeStr)?.time ?: 0L
-                        } catch (_: Exception) {
-                            timeMs = file.lastModified()
+                        val children = element.getElementsByTagName("*")
+                        for (j in 0 until children.length) {
+                            val childNode = children.item(j)
+                            if (childNode.nodeType == org.w3c.dom.Node.ELEMENT_NODE) {
+                                val childElem = childNode as org.w3c.dom.Element
+                                val childName = childElem.nodeName.lowercase(Locale.US)
+                                when {
+                                    childName.contains("speed_kmh") || (childName.contains("speed") && !childName.contains("fps")) -> {
+                                        val v = childElem.textContent.toFloatOrNull()
+                                        if (v != null && v >= 0f) speedKmh = v
+                                    }
+                                    childName.contains("time") -> {
+                                        val timeStr = childElem.textContent
+                                        timeMs = parseIso8601Time(timeStr)
+                                    }
+                                }
+                            }
                         }
+
+                        if (timeMs <= 0L) timeMs = file.lastModified()
+                        points.add(GpxPoint(latitude = lat, longitude = lon, speedKmh = speedKmh, timestampMs = timeMs))
                     }
-                    if (timeMs <= 0L) timeMs = file.lastModified()
-                    points.add(GpxPoint(latitude = lat, longitude = lon, speedKmh = speedKmh, timestampMs = timeMs))
+                }
+            }
+
+            if (points.isNotEmpty()) {
+                var lastValidTime = points[0].timestampMs.takeIf { it > 0L } ?: file.lastModified()
+                for (i in points.indices) {
+                    if (points[i].timestampMs <= 0L || (i > 0 && points[i].timestampMs <= points[i - 1].timestampMs)) {
+                        lastValidTime += 1000L
+                        points[i] = points[i].copy(timestampMs = lastValidTime)
+                    } else {
+                        lastValidTime = points[i].timestampMs
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -741,6 +803,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
 
                     if (includeLogs) {
+                        val logsDir = jp.hisanet.charisafe.util.FileUtils.getLogsDir(context)
+                        logsDir.listFiles()?.forEach { file ->
+                            if (file.isFile) {
+                                java.io.FileInputStream(file).use { fis ->
+                                    zos.putNextEntry(java.util.zip.ZipEntry("logs/${file.name}"))
+                                    fis.copyTo(zos, bufferSize = 16384)
+                                    zos.closeEntry()
+                                }
+                            }
+                        }
                         val gpxDir = jp.hisanet.charisafe.util.FileUtils.getGpxDir(context)
                         gpxDir.listFiles()?.forEach { file ->
                             if (file.isFile && file.name.endsWith(".gpx")) {

@@ -42,6 +42,7 @@ $FOOTER_TAGS""".trimIndent()
         }
     }
 
+    @Synchronized
     fun appendPoint(point: GpxPoint) {
         try {
             RandomAccessFile(gpxFile, "rw").use { file ->

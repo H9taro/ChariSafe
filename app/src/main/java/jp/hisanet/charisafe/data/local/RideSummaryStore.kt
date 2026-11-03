@@ -2,6 +2,9 @@ package jp.hisanet.charisafe.data.local
 
 import android.content.Context
 import android.util.Log
+import jp.hisanet.charisafe.data.debug.TraceLayer
+import jp.hisanet.charisafe.data.debug.TraceLogger
+import jp.hisanet.charisafe.data.debug.TraceMetric
 import jp.hisanet.charisafe.domain.model.EventCountSummary
 import jp.hisanet.charisafe.domain.model.RideSummary
 import jp.hisanet.charisafe.util.FileUtils
@@ -26,6 +29,9 @@ object RideSummaryStore {
             val jsonArray = JSONArray()
             summaries.forEach { sum ->
                 val obj = JSONObject().apply {
+                    put("gpxFileName", sum.gpxFileName)
+                    put("isCompleted", sum.isCompleted)
+                    put("lastAggregatedTimestampMs", sum.lastAggregatedTimestampMs)
                     put("startTimeMs", sum.startTimeMs)
                     put("endTimeMs", sum.endTimeMs)
                     put("movingTimeSec", sum.movingTimeSec)
@@ -58,6 +64,7 @@ object RideSummaryStore {
             FileWriter(file, false).use { writer ->
                 writer.write(jsonArray.toString())
             }
+            TraceLogger.getInstance(context).log(TraceMetric.RECORDING_STATE, TraceLayer.SYSTEM, summaries.size.toFloat(), "WRITE_RIDE_SUMMARIES", force = true)
             Log.i(TAG, "Successfully saved ${summaries.size} ride summaries")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save ride summaries", e)
@@ -89,6 +96,9 @@ object RideSummaryStore {
                 )
 
                 val summary = RideSummary(
+                    gpxFileName = obj.optString("gpxFileName", ""),
+                    isCompleted = obj.optBoolean("isCompleted", false),
+                    lastAggregatedTimestampMs = obj.optLong("lastAggregatedTimestampMs", 0L),
                     startTimeMs = obj.optLong("startTimeMs", 0L),
                     endTimeMs = obj.optLong("endTimeMs", 0L),
                     movingTimeSec = obj.optLong("movingTimeSec", 0L),
@@ -108,7 +118,9 @@ object RideSummaryStore {
                 )
                 list.add(summary)
             }
-            return list.sortedByDescending { it.startTimeMs }
+            val result = list.sortedByDescending { it.startTimeMs }
+            TraceLogger.getInstance(context).log(TraceMetric.RECORDING_STATE, TraceLayer.SYSTEM, result.size.toFloat(), "READ_RIDE_SUMMARIES", force = true)
+            return result
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load ride summaries", e)
             return emptyList()
