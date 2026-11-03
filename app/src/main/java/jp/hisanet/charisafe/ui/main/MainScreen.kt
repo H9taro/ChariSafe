@@ -329,6 +329,7 @@ fun MainScreen(
 @Composable
 fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
     val isRecording = uiState.status.state == RecordingState.RECORDING
+    var isScreenLocked by rememberSaveable { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -337,33 +338,41 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // 1. 速度メーター
+        // 1. 速度メーター (カード自体が誤操作防止ロックトグル)
         Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { isScreenLocked = !isScreenLocked },
+            colors = CardDefaults.cardColors(
+                containerColor = if (isScreenLocked) Color(0xFFFF9800) else MaterialTheme.colorScheme.primaryContainer
+            ),
             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
         ) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(24.dp),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.Center
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(
-                    text = String.format(Locale.US, "%.1f", uiState.status.currentSpeedKmh),
-                    fontSize = 90.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "km/h",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.padding(bottom = 14.dp)
-                )
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = String.format(Locale.US, "%.1f", uiState.status.currentSpeedKmh),
+                        fontSize = 80.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isScreenLocked) Color.Black else MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "km/h",
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (isScreenLocked) Color.Black else MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                }
             }
         }
 
@@ -380,16 +389,18 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
                     EventMetricCard(
                         metric = metric,
                         onThresholdChanged = { newValue ->
-                            val updatedSensitivity = when (metric.eventType) {
-                                EventType.APPROACH -> uiState.sensitivity.copy(approachSensitivity = newValue)
-                                EventType.DECELERATION -> uiState.sensitivity.copy(
-                                    decelerationSensitivity = newValue
-                                )
+                            if (!isScreenLocked) {
+                                val updatedSensitivity = when (metric.eventType) {
+                                    EventType.APPROACH -> uiState.sensitivity.copy(approachSensitivity = newValue)
+                                    EventType.DECELERATION -> uiState.sensitivity.copy(
+                                        decelerationSensitivity = newValue
+                                    )
 
-                                EventType.COLLISION -> uiState.sensitivity.copy(collisionSensitivity = newValue)
-                                EventType.SOUND -> uiState.sensitivity.copy(soundSensitivity = newValue)
+                                    EventType.COLLISION -> uiState.sensitivity.copy(collisionSensitivity = newValue)
+                                    EventType.SOUND -> uiState.sensitivity.copy(soundSensitivity = newValue)
+                                }
+                                viewModel.updateSensitivity(updatedSensitivity)
                             }
-                            viewModel.updateSensitivity(updatedSensitivity)
                         }
                     )
                 }
@@ -398,7 +409,9 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
 
         // 3. シャッターボタン
         CameraShutterButton(isRecording = isRecording) {
-            if (isRecording) viewModel.stopRecording() else viewModel.startRecording()
+            if (!isScreenLocked) {
+                if (isRecording) viewModel.stopRecording() else viewModel.startRecording()
+            }
         }
     }
 }

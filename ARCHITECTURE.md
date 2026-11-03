@@ -336,6 +336,11 @@ flowchart TD
 - `createAndShareZip()` において、`files/debug/` および `files/recordings/` に加え、`files/logs/`（`incident_logs.json`, `event_detection_logs.json`, `ride_summaries.json` 等）のすべての JSON ログファイルを ZIP アーカイブへ明示的に同梱する。
 - **録画中のアクションボタン制御**: 動画録画中（`RecordingState.RECORDING`）は、データ全削除および共有 ZIP 生成アクションのボタンが `enabled = !isRecording` により自動無効化（Disabled）され、進行中ファイルへの不整合アクセスや誤消去を保護防止する。
 
+### 14.3 ホーム画面誤操作防止ロック機能仕様 (`261103-07`)
+- ホーム画面（`MainContent`）の大型速度メーター（`km/h`）カード自体をトグルスイッチとして機能させ、タップにより画面誤操作防止ロック（`isScreenLocked`）を ON/OFF 切り替え可能とする（レイアウト変更不可）。
+- **オレンジ色背景表示**: ロック中（`isScreenLocked == true`）は速度メーターカードの背景色が `Color(0xFFFF9800)`（オレンジ色）へ変化し、ロック中であることを視覚的に明示する。
+- **高視認性の完全維持 ＆ ノブ移動禁止**: 各スライダーや数値テキストの視認性は一切落とさずクリアなまま維持しつつ、ロック中のスライダーノブの移動（`onThresholdChanged`）および録画ボタン操作（`onClick`）のみを物理ガード（無反応化）する。
+
 ---
 
 ## 15. 主要データの Life-Cycle マトリクス (生成・更新・参照)
