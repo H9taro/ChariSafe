@@ -218,7 +218,6 @@ flowchart TD
 |---|---|---|---|---|
 | **`EventDetectionLogStore`** | `List<EventDetectionLog>` | `logs/event_detection_logs.json` | `EventLogRepositoryImpl` | `EventLogRepositoryImpl` |
 | **`IncidentLogStore`** | `List<IncidentLog>` | `logs/incident_logs.json` | `EventLogRepositoryImpl` | `EventLogRepositoryImpl` |
-| **`RideSummaryStore`** | `List<RideSummary>` (gpxFileName, isCompleted, lastAggregatedTimestampMs 含む) | `logs/ride_summaries.json` | `MainViewModel` | `MainViewModel` |
 | **`GpxFileWriter`** | 走行軌跡ポイント (`.gpx`) | `gpx/ride_*.gpx` | `GpxRepositoryImpl` (`@Synchronized`排他制御) | `MainViewModel` |
 | **`RingBufferManager`** | 動画セグメント (`.mp4`) | `ringbuffer/seg_*.mp4`<br>(保護時: `recordings/`) | `RecordingService` | `RecordingService`, `RecordingRepositoryImpl` |
 
@@ -326,11 +325,10 @@ flowchart TD
 | **通知・警告音制御** | イベント発生時のビープ警告音発報、および保護完了時の OS 通知発行。 | `toneGenerator`, `showRecordingCompletionNotification` |
 
 ### 14.1 ライドサマリ集計仕様 (Ride Summary Calculation)
-- アプリ起動時（`MainViewModel.init`）およびサマリ画面表示時には、非同期によるタイトルの表示遅延やタイミング競合（Race Condition）を防ぐため、起動シーケンス内で確実に GPX ファイル（`files/gpx/ride_*.gpx`）のフル再計算を直結実行し、最新の計算済みサマリリストを確定させる。
-- XML 名前空間 `xmlns` 非依存の全要素走査 ＆ ISO 8601 マルチフォーマット対応の `readGpxPoints()` により、すべての永続化データから Haversine 公式による正確な総距離 (km)、移動時間、最高速度、平均速度を算出する。
-- **UI表示 (`RideSummaryContent`)**: 過去/現在を分けず、常に「現在の最新ライドサマリ」として 1 枚のカードで綺麗に集約・表示する。過去に保存されたサマリデータに現在進行中のセッションデータをスマートにマージし、再起動後も最新の累積状態を 100% 維持して表示する。
-- **有効性判定の緩和**: 厳格すぎる `totalDistanceKm > 0.0 && movingTimeSec > 0L` 条件を廃止し、タイムスタンプが正当であること（`endTimeMs > startTimeMs`）を基本条件とする。
-- **トレーサビリティログ**: `RideSummaryStore` および `MainViewModel` におけるライドサマリファイルの読み込み（Read）、書き込み（Write）の全挙動は、`TraceLogger` により `trace_*.log` へ記録される。
+- **キャッシュレス動的累積集計 (`calculateCumulativeRideSummary`)**: 中間キャッシュ `ride_summaries.json` は全廃。
+- **データ一元化**: 4 イベント件数（接近・減速・衝撃・音量）は、ホーム画面と同一の `event_detection_logs.json` から全件数を直接カウント（100% 整合）。
+- **全 GPX 軌跡結合**: 前回のデータ削除後からのすべての `files/gpx/ride_*.gpx` を全結合し、累積総距離、累積移動時間、累積停止時間、全最高速度、全平均速度を動的に一括計算。
+- **起動 ＆ アクション同期**: アプリ起動時（`init`）、サマリ画面表示時、および録画停止時に `calculateCumulativeRideSummary()` を同期呼出しし、常に最新の「現在の累積サマリ」を 1 枚カードとして即時反映する。
 
 ### 14.2 デバッグ・ログ共有 ZIP エクスポート ＆ アクション制御仕様 (`261103-10`)
 - `createAndShareZip()` において、`files/debug/` および `files/recordings/` に加え、`files/logs/`（`incident_logs.json`, `event_detection_logs.json`, `ride_summaries.json` 等）のすべての JSON ログファイルを ZIP アーカイブへ明示的に同梱する。
