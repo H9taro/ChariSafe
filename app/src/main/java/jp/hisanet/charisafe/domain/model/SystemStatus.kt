@@ -7,6 +7,7 @@ data class SystemStatus(
     val batteryTempCelsius: Float = 0f,
     val elapsedTimeSec: Long = 0L,
     val recordedBytes: Long = 0L,
+    val sessionStartTimeMs: Long = 0L,
     val activeGpxFile: String? = null,
     val lastEventFile: String? = null,
     val errorMessage: String? = null

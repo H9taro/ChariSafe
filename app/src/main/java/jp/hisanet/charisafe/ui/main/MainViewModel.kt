@@ -160,6 +160,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val status = SystemStatus(
             state = state,
             currentSpeedKmh = gpxPoint?.speedKmh ?: 0f,
+            sessionStartTimeMs = sessionStart,
             activeGpxFile = gpxRepository.getActiveGpxFilePath(),
             lastEventFile = incidents.firstOrNull()?.coveredSegmentFiles?.firstOrNull() ?: files.firstOrNull()?.absolutePath
         )
@@ -478,10 +479,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val config = configRepository.getConfig()
         recordingRepository.startRecording(config)
         gpxRepository.startLogging(config.gpsIntervalSeconds)
-        if (rideStartTimeMs == 0L) {
-            rideStartTimeMs = System.currentTimeMillis()
-            _sessionStartTimeMs.value = rideStartTimeMs
-        }
+        rideStartTimeMs = System.currentTimeMillis()
+        _sessionStartTimeMs.value = rideStartTimeMs
     }
 
     fun stopRecording() {
@@ -579,6 +578,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         RideSummaryStore.saveSummaries(getApplication(), currentList)
         _rideSummaries.value = currentList
         _sessionStartTimeMs.value = 0L
+        rideStartTimeMs = 0L
 
         loadExistingEvents()
         Log.i(TAG, "Ride ended and summary saved. Distance: $totalDistKm km")

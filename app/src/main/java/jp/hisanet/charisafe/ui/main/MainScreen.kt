@@ -71,6 +71,7 @@ import jp.hisanet.charisafe.domain.model.IncidentStatus
 import jp.hisanet.charisafe.domain.model.RecordingState
 import jp.hisanet.charisafe.domain.model.VideoResolution
 import jp.hisanet.charisafe.ui.component.EventMetricCard
+import jp.hisanet.charisafe.ui.component.SegmentProgressBar
 import jp.hisanet.charisafe.ui.model.EventUiConfig
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -339,41 +340,51 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         // 1. 速度メーター (カード自体が誤操作防止ロックトグル)
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { isScreenLocked = !isScreenLocked },
-            colors = CardDefaults.cardColors(
-                containerColor = if (isScreenLocked) Color(0xFFFF9800) else MaterialTheme.colorScheme.primaryContainer
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Column(
+            Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .clickable { isScreenLocked = !isScreenLocked },
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isScreenLocked) Color(0xFFFF9800) else MaterialTheme.colorScheme.primaryContainer
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.Center
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(
-                        text = String.format(Locale.US, "%.1f", uiState.status.currentSpeedKmh),
-                        fontSize = 80.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isScreenLocked) Color.Black else MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "km/h",
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = if (isScreenLocked) Color.Black else MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
+                    Row(
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = String.format(Locale.US, "%.1f", uiState.status.currentSpeedKmh),
+                            fontSize = 80.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isScreenLocked) Color.Black else MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "km/h",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (isScreenLocked) Color.Black else MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                    }
                 }
             }
+
+            SegmentProgressBar(
+                isRecording = isRecording,
+                sessionStartTimeMs = uiState.status.sessionStartTimeMs
+            )
         }
 
         // 2. 感度スライダー 4種 ＆ リアルタイム比較バー (共通 EventMetricCard ループ)
