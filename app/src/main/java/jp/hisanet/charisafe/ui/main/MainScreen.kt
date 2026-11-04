@@ -865,10 +865,10 @@ fun SettingsContent(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "⚠️ 録画中のため、設定の変更はロックされています（停止後に変更可能）",
+                    text = "⚠️ 録画中、設定変更をロックしています",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.errorContainer,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
                     modifier = Modifier.padding(16.dp)
                 )
             }
@@ -880,13 +880,6 @@ fun SettingsContent(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Text(
-                    text = "撮影設定 (Camera & Resolution)",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = Color.White
-                )
-
                 // アクティブカメラ
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -987,40 +980,6 @@ fun SettingsContent(
                         }
                     }
                 }
-
-                HorizontalDivider()
-
-                // リングバッファ時間
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("リングバッファ保持時間", fontSize = 16.sp, color = Color.White)
-                    var rbExpanded by remember { mutableStateOf(false) }
-                    Box {
-                        OutlinedButton(onClick = { rbExpanded = true }, enabled = !isRecording) {
-                            Text(
-                                "${config.ringBufferMinutes} 分",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = rbExpanded,
-                            onDismissRequest = { rbExpanded = false }) {
-                            listOf(3, 5, 10).forEach { min ->
-                                DropdownMenuItem(
-                                    text = { Text("$min 分", fontSize = 16.sp) },
-                                    onClick = {
-                                        viewModel.updateRingBuffer(min); rbExpanded = false
-                                    })
-                            }
-                        }
-                    }
-                }
-
                 // GPS記録間隔 (1秒を追加)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1041,7 +1000,7 @@ fun SettingsContent(
                         DropdownMenu(
                             expanded = gpsExpanded,
                             onDismissRequest = { gpsExpanded = false }) {
-                            listOf(1L, 5L, 10L, 30L, 60L).forEach { sec ->
+                            listOf(1L, 2L, 3L, 5L, 10L, 15L, 30L, 60L).forEach { sec ->
                                 DropdownMenuItem(
                                     text = { Text("$sec 秒", fontSize = 16.sp) },
                                     onClick = {

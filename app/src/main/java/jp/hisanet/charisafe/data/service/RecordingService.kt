@@ -315,24 +315,23 @@ class RecordingService : Service(), LifecycleOwner {
     }
 
     private fun startForegroundWithNotification() {
-        val silentChannelId = "charisafe_silent_channel"
-        val channel = NotificationChannel(
-            silentChannelId,
-            "Background Service",
-            NotificationManager.IMPORTANCE_NONE
-        ).apply {
-            description = "Background Service"
-            setShowBadge(false)
-        }
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(channel)
+        createNotificationChannel()
 
-        val notification: Notification = NotificationCompat.Builder(this, silentChannelId)
-            .setContentTitle("")
-            .setContentText("")
-            .setSmallIcon(android.R.color.transparent)
-            .setPriority(NotificationCompat.PRIORITY_MIN)
-            .setSilent(true)
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("ChariSafe計測中...")
+            .setContentText("バックグラウンド録画中です")
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
         startForeground(

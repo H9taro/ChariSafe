@@ -30,6 +30,7 @@ class RearApproachDetector(
     companion object {
         private const val TAG = "RearApproachDetector"
         private const val HIGH_BRIGHTNESS_PIXEL_VALUE = 0xFF
+        private const val BRIGHTNESS_MARGIN = 0x38
         private const val REQUIRED_CONSECUTIVE_FRAMES = 3 // 連続成立フレーム数
     }
 
@@ -77,7 +78,7 @@ class RearApproachDetector(
                         totalLuminosity += pixel
                         maxLuminosity += HIGH_BRIGHTNESS_PIXEL_VALUE
                         sampledCount++
-                        if (pixel >= HIGH_BRIGHTNESS_PIXEL_VALUE) {
+                        if (pixel >= HIGH_BRIGHTNESS_PIXEL_VALUE - BRIGHTNESS_MARGIN) {
                             highBrightnessPixelCount++
                         }
                     }
