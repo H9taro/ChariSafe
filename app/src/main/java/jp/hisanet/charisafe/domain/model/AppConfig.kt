@@ -16,5 +16,6 @@ data class AppConfig(
     val approachCooldownSec: Long = 60L,
     val collisionCooldownSec: Long = 0L,
     val soundCooldownSec: Long = 30L,
+    val approachGridCount: Int = 10,
     val clearPreviousLogsAndVideosOnStart: Boolean = false
 )

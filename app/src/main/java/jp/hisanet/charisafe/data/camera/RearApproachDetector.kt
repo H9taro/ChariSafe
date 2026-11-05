@@ -6,9 +6,6 @@ import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import jp.hisanet.charisafe.data.debug.ApproachDebugLogger
-import jp.hisanet.charisafe.data.debug.TraceLayer
-import jp.hisanet.charisafe.data.debug.TraceLogger
-import jp.hisanet.charisafe.data.debug.TraceMetric
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,21 +13,156 @@ import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.sqrt
 
+data class ApproachCalculationResult(
+    val approachScore: Float,
+    val maxClusterArea: Int,
+    val globalAvg: Float
+)
+
+fun computeApproachScore(
+    data: ByteArray,
+    width: Int,
+    height: Int,
+    rowStride: Int,
+    gridN: Int,
+    previousMaxClusterArea: Int
+): ApproachCalculationResult {
+    val blockW = (width / gridN).coerceAtLeast(1)
+    val blockH = (height / gridN).coerceAtLeast(1)
+
+    val blockSums = Array(gridN) { FloatArray(gridN) }
+
+    var totalSum = 0.0
+    var totalSampled = 0
+
+    val step = 4
+    for (r in 0 until gridN) {
+        val startY = r * blockH
+        val endY = ((r + 1) * blockH).coerceAtMost(height)
+        for (c in 0 until gridN) {
+            val startX = c * blockW
+            val endX = ((c + 1) * blockW).coerceAtMost(width)
+
+            var sum = 0L
+            var count = 0
+            for (y in startY until endY step step) {
+                val rowOffset = y * rowStride
+                for (x in startX until endX step step) {
+                    if (rowOffset + x < data.size) {
+                        val pixel = data[rowOffset + x].toInt() and 0xFF
+                        sum += pixel
+                        count++
+                    }
+                }
+            }
+            val avg = if (count > 0) sum.toFloat() / count else 0f
+            blockSums[r][c] = avg
+            totalSum += sum
+            totalSampled += count
+        }
+    }
+
+    val globalAvg = if (totalSampled > 0) (totalSum / totalSampled).toFloat() else 0f
+
+    val activeBlocks = Array(gridN) { BooleanArray(gridN) }
+    val relativeLuminance = Array(gridN) { FloatArray(gridN) }
+
+    for (r in 0 until gridN) {
+        for (c in 0 until gridN) {
+            val rel = (blockSums[r][c] - globalAvg).coerceAtLeast(0f)
+            relativeLuminance[r][c] = rel
+            if (rel >= 35.0f) {
+                activeBlocks[r][c] = true
+            }
+        }
+    }
+
+    val visited = Array(gridN) { BooleanArray(gridN) }
+    var maxClusterArea = 0
+    var maxClusterAvgRelLum = 0f
+
+    val dr = intArrayOf(-1, -1, -1, 0, 0, 1, 1, 1)
+    val dc = intArrayOf(-1, 0, 1, -1, 1, -1, 0, 1)
+
+    for (r in 0 until gridN) {
+        for (c in 0 until gridN) {
+            if (activeBlocks[r][c] && !visited[r][c]) {
+                var clusterArea = 0
+                var clusterRelLumSum = 0f
+
+                val queueR = IntArray(gridN * gridN)
+                val queueC = IntArray(gridN * gridN)
+                var head = 0
+                var tail = 0
+
+                queueR[tail] = r
+                queueC[tail] = c
+                tail++
+                visited[r][c] = true
+
+                while (head < tail) {
+                    val currR = queueR[head]
+                    val currC = queueC[head]
+                    head++
+
+                    clusterArea++
+                    clusterRelLumSum += relativeLuminance[currR][currC]
+
+                    for (d in 0 until 8) {
+                        val nr = currR + dr[d]
+                        val nc = currC + dc[d]
+                        if (nr in 0 until gridN && nc in 0 until gridN) {
+                            if (activeBlocks[nr][nc] && !visited[nr][nc]) {
+                                visited[nr][nc] = true
+                                queueR[tail] = nr
+                                queueC[tail] = nc
+                                tail++
+                            }
+                        }
+                    }
+                }
+
+                val clusterAvgRelLum = if (clusterArea > 0) clusterRelLumSum / clusterArea else 0f
+                if (clusterArea > maxClusterArea) {
+                    maxClusterArea = clusterArea
+                    maxClusterAvgRelLum = clusterAvgRelLum
+                }
+            }
+        }
+    }
+
+    val areaExpansion = (maxClusterArea - previousMaxClusterArea).coerceAtLeast(0)
+    val approachScore = (areaExpansion * maxClusterAvgRelLum).coerceAtLeast(0f)
+
+    return ApproachCalculationResult(
+        approachScore = approachScore,
+        maxClusterArea = maxClusterArea,
+        globalAvg = globalAvg
+    )
+}
+
+/**
+ * 案D: ブロック単位面積拡大率 ＋ 全体平均差 アルゴリズムによる後方車両接近検知器
+ */
 class RearApproachDetector(
     private val approachDebugLogger: ApproachDebugLogger? = null,
     private val getApproachSensitivity: () -> Float = { 100f },
+    private val getApproachGridCount: () -> Int = { 10 },
     private val onApproachDetected: () -> Unit
 ) : ImageAnalysis.Analyzer {
-    private lateinit var traceLogger: TraceLogger
-    constructor(getApproachSensitivity: () -> Float, onApproachDetected: () -> Unit) : this(null, getApproachSensitivity, onApproachDetected)
-    constructor(onApproachDetected: () -> Unit) : this(null, { 100f }, onApproachDetected)
+
+    constructor(
+        getApproachSensitivity: () -> Float,
+        onApproachDetected: () -> Unit
+    ) : this(null, getApproachSensitivity, { 10 }, onApproachDetected)
+
+    constructor(
+        onApproachDetected: () -> Unit
+    ) : this(null, { 100f }, { 10 }, onApproachDetected)
 
     companion object {
         private const val TAG = "RearApproachDetector"
-        private const val HIGH_BRIGHTNESS_PIXEL_VALUE = 0xFF
-        private const val BRIGHTNESS_MARGIN = 0x38
         private const val REQUIRED_CONSECUTIVE_FRAMES = 3 // 連続成立フレーム数
     }
 
@@ -39,9 +171,7 @@ class RearApproachDetector(
 
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
 
-    private val ratioHistory = FloatArray(REQUIRED_CONSECUTIVE_FRAMES)
-    private var historyIndex = 0
-
+    private var previousMaxClusterArea = 0
     private var frameCounter = 0
 
     @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
@@ -60,81 +190,48 @@ class RearApproachDetector(
             val rowStride = plane.rowStride
             val data = buffer.toByteArray()
 
-            // 1. 画面ピクセル値集計
-            val startX = 0
-            val startY = 0
+            val gridN = getApproachGridCount().coerceIn(4, 40)
+            val result = computeApproachScore(
+                data = data,
+                width = width,
+                height = height,
+                rowStride = rowStride,
+                gridN = gridN,
+                previousMaxClusterArea = previousMaxClusterArea
+            )
 
-            var totalLuminosity = 0L
-            var highBrightnessPixelCount = 0
-            var sampledCount = 0
-            val step = 4
-            var maxLuminosity = 0
+            previousMaxClusterArea = result.maxClusterArea
+            val approachScore = result.approachScore
 
-            for (y in startY until height step step) {
-                val rowOffset = y * rowStride
-                for (x in startX until width step step) {
-                    if (rowOffset + x < data.size) {
-                        val pixel = data[rowOffset + x].toInt() and HIGH_BRIGHTNESS_PIXEL_VALUE
-                        totalLuminosity += pixel
-                        maxLuminosity += HIGH_BRIGHTNESS_PIXEL_VALUE
-                        sampledCount++
-                        if (pixel >= HIGH_BRIGHTNESS_PIXEL_VALUE - BRIGHTNESS_MARGIN) {
-                            highBrightnessPixelCount++
-                        }
-                    }
-                }
-            }
-
-            val luminosityRatio = totalLuminosity.toDouble() / maxLuminosity.toDouble()
-            val currentRatio = sqrt(highBrightnessPixelCount.toDouble()).toFloat()
-
-            // 3. 移動平均による平滑化
-            ratioHistory[historyIndex] = currentRatio
-            historyIndex = (historyIndex + 1) % ratioHistory.size
-            val smoothedRatio = ratioHistory.average().toFloat()
-
-            // 前フレームとの比較による拡大率
-            val expansionRate = currentRatio - smoothedRatio
-
-            // 4. 接近スコア計算
-            val darkness = (1.0 - luminosityRatio)
-            val approachScore = (expansionRate * darkness * darkness).toFloat()
-
-            // 接近感度スライダー連動
             val userSensitivity = getApproachSensitivity()
-
             var triggered = false
 
-            // リアルタイム StateFlow の更新 (I/Fトレーサビリティ)
             _approachScoreState.value = approachScore
-            Log.d(TAG, "📊 [Trace] approachScore: $approachScore (Th: $userSensitivity)")
+            Log.d(TAG, "📊 [Trace] approachScore: $approachScore (Th: $userSensitivity, Grid: ${gridN}x${gridN}, Area: ${result.maxClusterArea}, GlobalAvg: ${result.globalAvg})")
 
-            // 5. スコア & 連続成立フレーム判定
             if (approachScore >= userSensitivity && frameCounter-- <= 0) {
                 Log.w(
                     TAG,
-                    "🚨 後方車両接近検知! Score: $approachScore (Th: $userSensitivity), AvgLum: $luminosityRatio"
+                    "🚨 後方車両接近検知! Score: $approachScore (Th: $userSensitivity), MaxClusterArea: ${result.maxClusterArea}, GlobalAvg: ${result.globalAvg}"
                 )
                 triggered = true
                 frameCounter = REQUIRED_CONSECUTIVE_FRAMES
                 toneGenerator.startTone(ToneGenerator.TONE_DTMF_S, 600)
                 onApproachDetected()
             }
+
             approachDebugLogger?.log(
-                luminosityRatio = luminosityRatio,
-                currentRatio = currentRatio,
-                smoothedRatio = smoothedRatio,
-                expansionRate = expansionRate,
+                luminosityRatio = result.globalAvg / 255.0,
+                currentRatio = result.maxClusterArea.toFloat(),
+                smoothedRatio = previousMaxClusterArea.toFloat(),
+                expansionRate = (result.maxClusterArea - previousMaxClusterArea).toFloat(),
                 approachScore = approachScore,
                 approachSensitivity = userSensitivity,
                 triggered = triggered
             )
-            traceLogger.log(TraceMetric.APPROACH, TraceLayer.DETECTOR, approachScore)
+
             val timeStr = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
-            Log.i(
-                "ApproachTrace",
-                "$timeStr\nDetector=$approachScore"
-            )
+            Log.i("ApproachTrace", "$timeStr\nDetector=$approachScore")
 
         } catch (e: Exception) {
             Log.e(TAG, "Error analyzing image frame for approach", e)

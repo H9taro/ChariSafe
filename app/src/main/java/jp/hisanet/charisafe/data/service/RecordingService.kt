@@ -429,10 +429,17 @@ class RecordingService : Service(), LifecycleOwner {
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
             .build()
 
-        val detector = RearApproachDetector(approachDebugLogger, {
-            val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
-            prefs.getFloat("key_approach_sensitivity", 100f)
-        }) {
+        val detector = RearApproachDetector(
+            approachDebugLogger = approachDebugLogger,
+            getApproachSensitivity = {
+                val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
+                prefs.getFloat("key_approach_sensitivity", 100f)
+            },
+            getApproachGridCount = {
+                val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
+                prefs.getInt("key_approach_grid_count", 10)
+            }
+        ) {
             val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
             val sens = prefs.getFloat("key_approach_sensitivity", 100f)
             val detectedScore = rearApproachDetector?.approachScoreState?.value ?: sens

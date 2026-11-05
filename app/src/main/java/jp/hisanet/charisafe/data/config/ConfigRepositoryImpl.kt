@@ -25,6 +25,7 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
         private const val KEY_APPROACH_COOLDOWN = "key_approach_cooldown"
         private const val KEY_COLLISION_COOLDOWN = "key_collision_cooldown"
         private const val KEY_SOUND_COOLDOWN = "key_sound_cooldown"
+        private const val KEY_APPROACH_GRID_COUNT = "key_approach_grid_count"
     }
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -49,6 +50,7 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
         val approachCooldown = prefs.getLong(KEY_APPROACH_COOLDOWN, 60L)
         val collisionCooldown = prefs.getLong(KEY_COLLISION_COOLDOWN, 0L)
         val soundCooldown = prefs.getLong(KEY_SOUND_COOLDOWN, 30L)
+        val approachGridCount = prefs.getInt(KEY_APPROACH_GRID_COUNT, 10)
 
         val resName = prefs.getString(KEY_RESOLUTION, VideoResolution.HD_720P.name) ?: VideoResolution.HD_720P.name
         val resolution = try {
@@ -67,7 +69,8 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
             decelerationCooldownSec = decelerationCooldown,
             approachCooldownSec = approachCooldown,
             collisionCooldownSec = collisionCooldown,
-            soundCooldownSec = soundCooldown
+            soundCooldownSec = soundCooldown,
+            approachGridCount = approachGridCount
         )
     }
 
@@ -85,6 +88,7 @@ class ConfigRepositoryImpl(context: Context) : ConfigRepository {
                 .putLong(KEY_APPROACH_COOLDOWN, config.approachCooldownSec)
                 .putLong(KEY_COLLISION_COOLDOWN, config.collisionCooldownSec)
                 .putLong(KEY_SOUND_COOLDOWN, config.soundCooldownSec)
+                .putInt(KEY_APPROACH_GRID_COUNT, config.approachGridCount)
         }
 
         _configState.value = config

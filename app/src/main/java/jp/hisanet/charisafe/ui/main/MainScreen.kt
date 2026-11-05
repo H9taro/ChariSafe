@@ -1025,6 +1025,40 @@ fun SettingsContent(
                         }
                     }
                 }
+
+                // 接近検知 格子分割数 (8x8, 10x10, 20x20, 40x40 選択可能)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("接近検知 格子分割数", fontSize = 16.sp, color = Color.White)
+                    var gridExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        OutlinedButton(onClick = { gridExpanded = true }, enabled = !isRecording) {
+                            Text(
+                                "${config.approachGridCount}x${config.approachGridCount}",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = gridExpanded,
+                            onDismissRequest = { gridExpanded = false }
+                        ) {
+                            listOf(8, 10, 20, 40).forEach { cnt ->
+                                DropdownMenuItem(
+                                    text = { Text("${cnt}x${cnt}", fontSize = 16.sp) },
+                                    onClick = {
+                                        viewModel.updateApproachGridCount(cnt)
+                                        gridExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }

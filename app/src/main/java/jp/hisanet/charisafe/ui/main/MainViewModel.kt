@@ -523,6 +523,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         configRepository.updateConfig(current.copy(ringBufferMinutes = minutes))
     }
 
+    fun updateApproachGridCount(count: Int) {
+        val current = configRepository.getConfig()
+        configRepository.updateConfig(current.copy(approachGridCount = count))
+    }
+
     fun updateSensitivity(sensitivity: EventSensitivity) {
         _sensitivity.value = sensitivity
         prefs.edit {
