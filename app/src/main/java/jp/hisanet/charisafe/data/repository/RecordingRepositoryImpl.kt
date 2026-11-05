@@ -57,14 +57,14 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
                     launch {
                         s.approachScoreState.collect {
                             _approachScoreState.value = it
-                            TraceLogger.getInstance(context)?.log(TraceMetric.APPROACH, TraceLayer.REPOSITORY, it)
+                            TraceLogger.getInstance(context).log(TraceMetric.APPROACH, TraceLayer.REPOSITORY, it)
                             val timeStr = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
                             Log.i("ApproachTrace", "$timeStr\nRepo=$it")
                             Log.d(TAG, "📊 [TraceRepo] approach: $it")
                         }
                     }
-                    launch { s.gForceState.collect { _gForceState.value = it; TraceLogger.getInstance(context)?.log(TraceMetric.COLLISION, TraceLayer.REPOSITORY, it); Log.d(TAG, "📊 [TraceRepo] gForce: $it") } }
-                    launch { s.soundAmplitudeState.collect { _soundAmplitudeState.value = it; TraceLogger.getInstance(context)?.log(TraceMetric.SOUND, TraceLayer.REPOSITORY, it); val timeStr = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date()); Log.i("AudioStatTrace", "$timeStr\n5. RepoReceived=$it") } }
+                    launch { s.gForceState.collect { _gForceState.value = it; TraceLogger.getInstance(context).log(TraceMetric.COLLISION, TraceLayer.REPOSITORY, it); Log.d(TAG, "📊 [TraceRepo] gForce: $it") } }
+                    launch { s.soundAmplitudeState.collect { _soundAmplitudeState.value = it; TraceLogger.getInstance(context).log(TraceMetric.SOUND, TraceLayer.REPOSITORY, it); val timeStr = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date()); Log.i("AudioStatTrace", "$timeStr\n5. RepoReceived=$it") } }
                 }
             }
         }

@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.delay
 
 /**
@@ -40,7 +41,7 @@ fun SegmentProgressBar(
             } else {
                 progress = 0f
             }
-            delay(50L) // 20fps update for smooth progress bar
+            delay(50.milliseconds) // 20fps update for smooth progress bar
         }
     }
 

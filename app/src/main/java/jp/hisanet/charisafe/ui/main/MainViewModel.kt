@@ -115,7 +115,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentRideSummary = MutableStateFlow<RideSummary?>(null)
     private val _isZipGenerating = MutableStateFlow(false)
     private var rideStartTimeMs: Long = 0L
-    private val recordedPoints = mutableListOf<jp.hisanet.charisafe.domain.model.GpxPoint>()
+    private val recordedPoints = mutableListOf<GpxPoint>()
 
     val uiState: StateFlow<MainUiState> = combine(
         combine(configRepository.configState, recordingRepository.recordingState, gpxRepository.currentGpxPoint) { cfg, state, gpx ->
@@ -127,8 +127,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         combine(_currentScreen, _targetEventId, _sensitivity) { screen, targetId, sens ->
             Triple(screen, targetId, sens)
         },
-        combine(_currentRideSummary, _rideSummaries, _sessionStartTimeMs, _isZipGenerating) { currentSum, summaries, sessionStart, isZipGen ->
-            listOf(currentSum, summaries, sessionStart, isZipGen)
+        combine(_currentRideSummary, _rideSummaries, _sessionStartTimeMs, _isZipGenerating) { _, summaries, sessionStart, isZipGen ->
+            listOf(null, summaries, sessionStart, isZipGen)
         },
         combine(recordingRepository.approachScoreState, gpxRepository.decelerationState, recordingRepository.gForceState, recordingRepository.soundAmplitudeState) { app, dec, g, snd ->
             listOf(app, dec, g, snd)
@@ -172,9 +172,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             collisionCount = detections.count { it.eventType == EventType.COLLISION },
             soundCount = detections.count { it.eventType == EventType.SOUND }
         )
-
-        // ホーム画面の件数も履歴と完全に一致させるため totalCounts を同期
-        val sessionCounts = totalCounts
 
         // タイムライン構築＆日付グルーピング (降順) - 完全な動画中心モデルとして Recording のみを対象とする
         val timeline = mutableListOf<TimelineItem>()

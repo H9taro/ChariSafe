@@ -3,18 +3,18 @@ package jp.hisanet.charisafe.domain.model
 /**
  * 保護決定および通知発報の理由
  */
-enum class ProtectionReason() {
-    PREVIOUS_SEGMENT_AUTO_PROTECTION(),
-    PENDING_PROTECTION_SET(),
-    PENDING_PROTECTION_FINALIZED(),
-    ALREADY_PROTECTED_SKIP(),
+enum class ProtectionReason {
+    PREVIOUS_SEGMENT_AUTO_PROTECTION,
+    PENDING_PROTECTION_SET,
+    PENDING_PROTECTION_FINALIZED,
+    ALREADY_PROTECTED_SKIP,
 }
 
 /**
  * 保護処理失敗理由
  */
-enum class ProtectionFailureReason() {
-    FILE_COPY_FAILED(),
+enum class ProtectionFailureReason {
+    FILE_COPY_FAILED,
 }
 
 /**

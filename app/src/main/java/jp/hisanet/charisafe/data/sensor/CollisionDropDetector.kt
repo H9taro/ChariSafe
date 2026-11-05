@@ -59,12 +59,12 @@ class CollisionDropDetector(
             val z = event.values[2]
 
             // 合成加速度 (G換算)
-            val acceleration = sqrt((x * x + (y * y).toDouble() + (z * z)).toDouble()).toFloat()
+            val acceleration = sqrt((x * x + y * y + z * z).toDouble()).toFloat()
             val gForce = acceleration / GRAVITY_G
 
             // リアルタイム StateFlow の更新 (I/Fトレーサビリティ)
             _gForceState.value = gForce
-            TraceLogger.getInstance(context)?.log(TraceMetric.COLLISION, TraceLayer.DETECTOR, gForce)
+            TraceLogger.getInstance(context).log(TraceMetric.COLLISION, TraceLayer.DETECTOR, gForce)
             Log.d(TAG, "📊 [Trace] gForce: ${String.format(java.util.Locale.US, "%.2f", gForce)}G")
 
             val triggered = gForce >= SHOCK_THRESHOLD_G

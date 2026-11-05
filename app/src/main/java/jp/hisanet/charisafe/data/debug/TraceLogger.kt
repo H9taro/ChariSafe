@@ -1,5 +1,6 @@
 package jp.hisanet.charisafe.data.debug
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Log
 import jp.hisanet.charisafe.util.FileUtils
@@ -33,11 +34,15 @@ enum class TraceLayer {
     SYSTEM
 }
 
-class TraceLogger private constructor(private val context: Context) {
+class TraceLogger private constructor(context: Context) {
+
+    private val context: Context = context.applicationContext
 
     companion object {
         private const val TAG = "TraceLogger"
 
+        @SuppressLint("StaticFieldLeak")
+        @Volatile
         private var instance: TraceLogger? = null
 
         fun getInstance(context: Context): TraceLogger {
