@@ -10,6 +10,7 @@ import jp.hisanet.charisafe.domain.model.GpxPoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.Locale
 
 class LocationTracker(context: Context) {
 
@@ -32,16 +33,38 @@ class LocationTracker(context: Context) {
     private val locationListener by lazy {
         object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                var speedKmh = if (location.hasSpeed()) location.speed * 3.6f else 0f
+                val hasSpeed = location.hasSpeed()
+                val rawSpeedMs = if (hasSpeed) location.speed else 0f
+                val hwSpeedKmh = rawSpeedMs * 3.6f
 
-                // フォールバック: hasSpeed() がない場合や0の場合、前回位置との差分から速度を計算
-                if (speedKmh < 0.5f && previousLocation != null) {
-                    val distMeters = previousLocation!!.distanceTo(location)
-                    val timeDeltaSec = (location.time - previousLocation!!.time) / 1000f
+                var distMeters = 0f
+                var timeDeltaSec = 0f
+                var calcMs = 0f
+
+                if (previousLocation != null) {
+                    distMeters = previousLocation!!.distanceTo(location)
+                    timeDeltaSec = (location.time - previousLocation!!.time) / 1000f
                     if (timeDeltaSec > 0.1f) {
-                        val calcMs = distMeters / timeDeltaSec
-                        speedKmh = (calcMs * 3.6f).coerceAtLeast(0f)
+                        calcMs = distMeters / timeDeltaSec
                     }
+                }
+
+                var finalSpeedKmh = hwSpeedKmh
+
+                // フォールバック & 二重判定 (Dual Validation):
+                // 1. ハードウェア速度が無いか 0.5km/h 未満の場合、距離差分から計算
+                if (hwSpeedKmh < 0.5f) {
+                    if (distMeters >= 0.5f && timeDeltaSec > 0.1f) { // 距離デッドバンド: 0.5m未満はノイズとして無視
+                        finalSpeedKmh = (calcMs * 3.6f).coerceAtLeast(0f)
+                    } else {
+                        // 距離が 0.5m 未満の場合は移動なし (0.0km/h) と判定
+                        finalSpeedKmh = 0f
+                    }
+                }
+
+                // 2. 二重判定: ハードウェアが hasSpeed() == true でかつ 0km/h 付近、かつ移動距離が 1.0m 未満なら 0km/h を最優先
+                if (hasSpeed && hwSpeedKmh < 0.5f && distMeters < 1.0f) {
+                    finalSpeedKmh = 0f
                 }
 
                 previousLocation = location
@@ -50,14 +73,19 @@ class LocationTracker(context: Context) {
                     latitude = location.latitude,
                     longitude = location.longitude,
                     elevation = if (location.hasAltitude()) location.altitude else 0.0,
-                    speedKmh = speedKmh,
+                    speedKmh = finalSpeedKmh,
                     timestampMs = if (location.time > 0) location.time else System.currentTimeMillis()
                 )
                 _currentLocation.value = point
                 lastValidLatitude = location.latitude
                 lastValidLongitude = location.longitude
-                lastValidSpeedKmh = speedKmh
+                lastValidSpeedKmh = finalSpeedKmh
                 lastLocationTimestampMs = point.timestampMs
+
+                Log.d(
+                    TAG,
+                    "📊 [GPS Evaluation] hasSpeed: $hasSpeed, location.speed: $rawSpeedMs, distMeters: ${String.format(Locale.US, "%.2f", distMeters)}, timeDeltaSec: ${String.format(Locale.US, "%.2f", timeDeltaSec)}, calcMs: ${String.format(Locale.US, "%.2f", calcMs)}, finalSpeedKmh: ${String.format(Locale.US, "%.2f", finalSpeedKmh)}"
+                )
                 Log.i(TAG, "🟢 FRESH GPS Location: lat=${point.latitude}, lon=${point.longitude}, speed=${point.speedKmh} km/h")
             }
 
