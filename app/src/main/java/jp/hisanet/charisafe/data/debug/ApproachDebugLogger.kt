@@ -9,17 +9,24 @@ class ApproachDebugLogger(private val context: Context) {
     private val csvLogger = CsvDebugLogger(
         context = context,
         filePrefix = "approach_debug",
-        header = "timestamp,avgLuminosity,currentRatio,smoothedRatio,expansionRate,ratioScore,expansionScore,approachScore,dynamicScoreThreshold,consecutiveCount,triggered,eventLogId"
+        header = "timestamp,avgLuminosity,activeBlockRatio,maxClusterArea,clusterDensity,clusterAspect,wOccupancy,wDensity,wAspect,rawScore,areaExpansion,effectiveExpansion,emaScore,approachSensitivity,triggered,eventLogId"
     )
 
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", Locale.US)
 
     fun log(
         luminosityRatio: Double,
-        currentRatio: Float,
-        smoothedRatio: Float,
-        expansionRate: Float,
-        approachScore: Float,
+        activeBlockRatio: Float,
+        maxClusterArea: Int,
+        clusterDensity: Float,
+        clusterAspect: Float,
+        wOccupancy: Float,
+        wDensity: Float,
+        wAspect: Float,
+        rawScore: Float,
+        areaExpansion: Int,
+        effectiveExpansion: Int,
+        emaScore: Float,
         approachSensitivity: Float,
         triggered: Boolean,
         eventLogId: String = ""
@@ -28,9 +35,9 @@ class ApproachDebugLogger(private val context: Context) {
         val isEnabled = prefs.getBoolean("key_approach_csv_enabled", false)
         if (!isEnabled) return
 
-        if (approachScore > 0f || triggered) {
+        if (emaScore > 0f || triggered) {
             val timestamp = dateFormat.format(Date())
-            val row = "$timestamp,$luminosityRatio,$currentRatio,$smoothedRatio,$expansionRate,$approachScore,$approachSensitivity,$triggered,$eventLogId"
+            val row = "$timestamp,$luminosityRatio,$activeBlockRatio,$maxClusterArea,$clusterDensity,$clusterAspect,$wOccupancy,$wDensity,$wAspect,$rawScore,$areaExpansion,$effectiveExpansion,$emaScore,$approachSensitivity,$triggered,$eventLogId"
             csvLogger.appendRow(row)
         }
     }

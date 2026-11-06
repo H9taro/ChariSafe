@@ -11,10 +11,10 @@ object EventUiConfig {
                 EventUiDefinition(
                     displayName = "接近",
                     emoji = "🚗",
-                    format = "%.1f",
+                    format = "%.2f",
                     unitName = "",
-                    sliderMin = 100f,
-                    sliderMax = 500f
+                    sliderMin = 0f,
+                    sliderMax = 5f
                 )
 
             EventType.DECELERATION ->

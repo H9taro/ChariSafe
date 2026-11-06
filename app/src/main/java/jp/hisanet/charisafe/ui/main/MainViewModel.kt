@@ -107,7 +107,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _sensitivity = MutableStateFlow(
         EventSensitivity(
             decelerationSensitivity = prefs.getFloat("key_decel_sensitivity", 1.5f),
-            approachSensitivity = prefs.getFloat("key_approach_sensitivity", 0.7f),
+            approachSensitivity = prefs.getFloat("key_approach_sensitivity", 1.5f),
             collisionSensitivity = prefs.getFloat("key_collision_sensitivity", 3.0f),
             soundSensitivity = prefs.getFloat("key_sound_sensitivity", 0.6f)
         )

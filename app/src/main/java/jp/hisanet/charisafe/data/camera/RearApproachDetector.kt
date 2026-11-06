@@ -13,10 +13,21 @@ import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.ln
 
 data class ApproachCalculationResult(
+    val rawScore: Float,
+    val areaExpansion: Int,
+    val effectiveExpansion: Int,
+    val emaScore: Float,
     val approachScore: Float,
+    val activeBlockRatio: Float,
     val maxClusterArea: Int,
+    val clusterDensity: Float,
+    val clusterAspect: Float,
+    val wOccupancy: Float,
+    val wDensity: Float,
+    val wAspect: Float,
     val globalAvg: Float
 )
 
@@ -26,7 +37,8 @@ fun computeApproachScore(
     height: Int,
     rowStride: Int,
     gridN: Int,
-    previousMaxClusterArea: Int
+    previousMaxClusterArea: Int,
+    previousEmaScore: Float
 ): ApproachCalculationResult {
     val blockW = (width / gridN).coerceAtLeast(1)
     val blockH = (height / gridN).coerceAtLeast(1)
@@ -67,6 +79,7 @@ fun computeApproachScore(
 
     val activeBlocks = Array(gridN) { BooleanArray(gridN) }
     val relativeLuminance = Array(gridN) { FloatArray(gridN) }
+    var activeBlockCount = 0
 
     for (r in 0 until gridN) {
         for (c in 0 until gridN) {
@@ -74,13 +87,28 @@ fun computeApproachScore(
             relativeLuminance[r][c] = rel
             if (rel >= 35.0f) {
                 activeBlocks[r][c] = true
+                activeBlockCount++
             }
         }
+    }
+
+    val totalGridCount = (gridN * gridN).toFloat()
+    val activeBlockRatio = activeBlockCount / totalGridCount
+
+    // 全有効ブロック占有率ペナルティ (W_occupancy)
+    val wOccupancy = if (activeBlockRatio <= 0.20f) {
+        1.0f
+    } else {
+        (1.0f - (activeBlockRatio - 0.20f) / 0.30f).coerceAtLeast(0.1f)
     }
 
     val visited = Array(gridN) { BooleanArray(gridN) }
     var maxClusterArea = 0
     var maxClusterAvgRelLum = 0f
+    var bestClusterDensity = 1.0f
+    var bestClusterAspect = 1.0f
+    var bestWDensity = 1.0f
+    var bestWAspect = 1.0f
 
     val dr = intArrayOf(-1, -1, -1, 0, 0, 1, 1, 1)
     val dc = intArrayOf(-1, 0, 1, -1, 1, -1, 0, 1)
@@ -90,6 +118,11 @@ fun computeApproachScore(
             if (activeBlocks[r][c] && !visited[r][c]) {
                 var clusterArea = 0
                 var clusterRelLumSum = 0f
+
+                var minR = r
+                var maxR = r
+                var minC = c
+                var maxC = c
 
                 val queueR = IntArray(gridN * gridN)
                 val queueC = IntArray(gridN * gridN)
@@ -109,6 +142,11 @@ fun computeApproachScore(
                     clusterArea++
                     clusterRelLumSum += relativeLuminance[currR][currC]
 
+                    if (currR < minR) minR = currR
+                    if (currR > maxR) maxR = currR
+                    if (currC < minC) minC = currC
+                    if (currC > maxC) maxC = currC
+
                     for (d in 0 until 8) {
                         val nr = currR + dr[d]
                         val nc = currC + dc[d]
@@ -123,21 +161,60 @@ fun computeApproachScore(
                     }
                 }
 
+                val bboxW = (maxC - minC + 1).toFloat()
+                val bboxH = (maxR - minR + 1).toFloat()
+                val bboxArea = bboxW * bboxH
+
+                // クラスタ密度 (D = clusterArea / bboxArea)
+                val density = if (bboxArea > 0f) clusterArea.toFloat() / bboxArea else 1.0f
+                val wDensity = (density / 0.50f).coerceAtMost(1.0f)
+
+                // アスペクト比 (Aspect = max(W, H) / min(W, H))
+                val aspect = maxOf(bboxW, bboxH) / minOf(bboxW, bboxH)
+                val wAspect = if (aspect <= 2.0f) {
+                    1.0f
+                } else {
+                    (2.0f / aspect).coerceAtLeast(0.1f)
+                }
+
                 val clusterAvgRelLum = if (clusterArea > 0) clusterRelLumSum / clusterArea else 0f
+
                 if (clusterArea > maxClusterArea) {
                     maxClusterArea = clusterArea
                     maxClusterAvgRelLum = clusterAvgRelLum
+                    bestClusterDensity = density
+                    bestClusterAspect = aspect
+                    bestWDensity = wDensity
+                    bestWAspect = wAspect
                 }
             }
         }
     }
 
     val areaExpansion = (maxClusterArea - previousMaxClusterArea).coerceAtLeast(0)
-    val approachScore = (areaExpansion * maxClusterAvgRelLum).coerceAtLeast(0f)
+    // 1. デッドバンド (ΔA < 2 は 0)
+    val effectiveExpansion = if (areaExpansion < 2) 0 else areaExpansion
+
+    val sRaw = (effectiveExpansion * maxClusterAvgRelLum) * wOccupancy * bestWDensity * bestWAspect
+    val rawScore = ln(1.0f + sRaw / 10.0f)
+
+    // 2. スムーズな指数平滑化 (EMA alpha = 0.3f)
+    val alpha = 0.3f
+    val emaScore = (previousEmaScore * (1.0f - alpha) + rawScore * alpha)
 
     return ApproachCalculationResult(
-        approachScore = approachScore,
+        rawScore = rawScore,
+        areaExpansion = areaExpansion,
+        effectiveExpansion = effectiveExpansion,
+        emaScore = emaScore,
+        approachScore = emaScore,
+        activeBlockRatio = activeBlockRatio,
         maxClusterArea = maxClusterArea,
+        clusterDensity = bestClusterDensity,
+        clusterAspect = bestClusterAspect,
+        wOccupancy = wOccupancy,
+        wDensity = bestWDensity,
+        wAspect = bestWAspect,
         globalAvg = globalAvg
     )
 }
@@ -172,6 +249,7 @@ class RearApproachDetector(
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
 
     private var previousMaxClusterArea = 0
+    private var previousEmaScore = 0f
     private var frameCounter = 0
 
     @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
@@ -197,22 +275,27 @@ class RearApproachDetector(
                 height = height,
                 rowStride = rowStride,
                 gridN = gridN,
-                previousMaxClusterArea = previousMaxClusterArea
+                previousMaxClusterArea = previousMaxClusterArea,
+                previousEmaScore = previousEmaScore
             )
 
             previousMaxClusterArea = result.maxClusterArea
+            previousEmaScore = result.emaScore
             val approachScore = result.approachScore
 
-            val userSensitivity = getApproachSensitivity()
+            val uiSensitivity = getApproachSensitivity()
             var triggered = false
 
             _approachScoreState.value = approachScore
-            Log.d(TAG, "📊 [Trace] approachScore: $approachScore (Th: $userSensitivity, Grid: ${gridN}x${gridN}, Area: ${result.maxClusterArea}, GlobalAvg: ${result.globalAvg})")
+            Log.d(
+                TAG,
+                "📊 [Trace] ActiveBlockRatio: ${result.activeBlockRatio}, MaxClusterArea: ${result.maxClusterArea}, ClusterDensity: ${result.clusterDensity}, ClusterAspect: ${result.clusterAspect}, Woccupancy: ${result.wOccupancy}, Wdensity: ${result.wDensity}, Waspect: ${result.wAspect}, RawScore: ${result.rawScore}, AreaExpansion: ${result.areaExpansion}, EffectiveExpansion: ${result.effectiveExpansion}, EmaScore: ${result.emaScore}, ApproachScore: $approachScore (Th: $uiSensitivity)"
+            )
 
-            if (approachScore >= userSensitivity && frameCounter-- <= 0) {
+            if (approachScore >= uiSensitivity && frameCounter-- <= 0) {
                 Log.w(
                     TAG,
-                    "🚨 後方車両接近検知! Score: $approachScore (Th: $userSensitivity), MaxClusterArea: ${result.maxClusterArea}, GlobalAvg: ${result.globalAvg}"
+                    "🚨 後方車両接近検知! Score: $approachScore (Th: $uiSensitivity), ActiveBlockRatio: ${result.activeBlockRatio}, MaxClusterArea: ${result.maxClusterArea}, Aspect: ${result.clusterAspect}"
                 )
                 triggered = true
                 frameCounter = REQUIRED_CONSECUTIVE_FRAMES
@@ -222,11 +305,18 @@ class RearApproachDetector(
 
             approachDebugLogger?.log(
                 luminosityRatio = result.globalAvg / 255.0,
-                currentRatio = result.maxClusterArea.toFloat(),
-                smoothedRatio = previousMaxClusterArea.toFloat(),
-                expansionRate = (result.maxClusterArea - previousMaxClusterArea).toFloat(),
-                approachScore = approachScore,
-                approachSensitivity = userSensitivity,
+                activeBlockRatio = result.activeBlockRatio,
+                maxClusterArea = result.maxClusterArea,
+                clusterDensity = result.clusterDensity,
+                clusterAspect = result.clusterAspect,
+                wOccupancy = result.wOccupancy,
+                wDensity = result.wDensity,
+                wAspect = result.wAspect,
+                rawScore = result.rawScore,
+                areaExpansion = result.areaExpansion,
+                effectiveExpansion = result.effectiveExpansion,
+                emaScore = result.emaScore,
+                approachSensitivity = uiSensitivity,
                 triggered = triggered
             )
 

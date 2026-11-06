@@ -34,6 +34,7 @@ import androidx.camera.video.VideoRecordEvent
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
+import kotlin.math.pow
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import jp.hisanet.charisafe.MainActivity
@@ -433,7 +434,7 @@ class RecordingService : Service(), LifecycleOwner {
             approachDebugLogger = approachDebugLogger,
             getApproachSensitivity = {
                 val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
-                prefs.getFloat("key_approach_sensitivity", 100f)
+                prefs.getFloat("key_approach_sensitivity", 1.5f)
             },
             getApproachGridCount = {
                 val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
@@ -441,7 +442,7 @@ class RecordingService : Service(), LifecycleOwner {
             }
         ) {
             val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
-            val sens = prefs.getFloat("key_approach_sensitivity", 100f)
+            val sens = prefs.getFloat("key_approach_sensitivity", 1.5f)
             val detectedScore = rearApproachDetector?.approachScoreState?.value ?: sens
             handleDetectedEvent(
                 EventType.APPROACH,
@@ -528,7 +529,7 @@ class RecordingService : Service(), LifecycleOwner {
         }
         val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
         val sens = when (eventType) {
-            EventType.APPROACH -> prefs.getFloat("key_approach_sensitivity", 0.7f)
+            EventType.APPROACH -> prefs.getFloat("key_approach_sensitivity", 1.5f)
             EventType.DECELERATION -> prefs.getFloat("key_decel_sensitivity", 1.5f)
             EventType.COLLISION -> prefs.getFloat("key_collision_sensitivity", 3.0f)
             EventType.SOUND -> prefs.getFloat("key_sound_sensitivity", 0.7f)
