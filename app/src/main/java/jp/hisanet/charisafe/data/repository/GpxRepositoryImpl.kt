@@ -6,7 +6,9 @@ import jp.hisanet.charisafe.data.debug.DecelerationDebugLogger
 import jp.hisanet.charisafe.data.gpx.GpxFileWriter
 import jp.hisanet.charisafe.data.location.LocationTracker
 import jp.hisanet.charisafe.data.location.SpeedDecelerationDetector
+import jp.hisanet.charisafe.data.session.JsonlRideSessionStore
 import jp.hisanet.charisafe.domain.model.GpxPoint
+import jp.hisanet.charisafe.domain.model.LocationPoint
 import jp.hisanet.charisafe.domain.repository.GpxRepository
 import jp.hisanet.charisafe.util.FileUtils
 import kotlinx.coroutines.CoroutineScope
@@ -32,7 +34,7 @@ class GpxRepositoryImpl(
     }
 
     private val locationTracker = LocationTracker(context)
-    private val jsonlSessionLogger = jp.hisanet.charisafe.data.session.JsonlSessionLogger(context)
+    private val jsonlSessionStore = JsonlRideSessionStore(context)
     private var gpxWriter: GpxFileWriter? = null
     private var activeGpxFile: File? = null
     private var collectJob: Job? = null
@@ -71,7 +73,7 @@ class GpxRepositoryImpl(
         val file = File(gpxDir, "ride_${timestamp}.gpx")
         activeGpxFile = file
         gpxWriter = GpxFileWriter(file)
-        jsonlSessionLogger.startSession("REC_$timestamp")
+        jsonlSessionStore.startSession("REC_$timestamp")
 
         locationTracker.startTracking(intervalSeconds)
 
@@ -81,7 +83,8 @@ class GpxRepositoryImpl(
                 if (point != null) {
                     gpxWriter?.appendPoint(point)
                     decelerationDetector.feedPoint(point)
-                    jsonlSessionLogger.logGpxFix(point.latitude, point.longitude, point.elevation, point.speedKmh)
+                    val pointModel = LocationPoint(point.latitude, point.longitude, point.elevation)
+                    jsonlSessionStore.recordGpsFix(pointModel, point.speedKmh, 0f)
                 }
             }
         }
@@ -92,7 +95,7 @@ class GpxRepositoryImpl(
         collectJob?.cancel()
         collectJob = null
         locationTracker.stopTracking()
-        jsonlSessionLogger.stopSession("REC_STOP")
+        jsonlSessionStore.stopSession("REC_STOP")
         gpxWriter = null
         activeGpxFile = null
         Log.i(TAG, "Stopped logging")

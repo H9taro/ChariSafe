@@ -2,12 +2,13 @@ package jp.hisanet.charisafe.domain.repository
 
 import jp.hisanet.charisafe.domain.model.EventType
 import jp.hisanet.charisafe.domain.model.LocationPoint
+import jp.hisanet.charisafe.domain.model.RideMovementState
 
 interface RideSessionStore {
     fun startSession(sessionId: String)
     fun stopSession(sessionId: String)
 
-    fun recordStateTick(state: String)
+    fun recordStateTick(state: RideMovementState)
     fun recordGpsFix(point: LocationPoint, spd: Float, accuracy: Float)
     fun recordGpsLost(reason: String)
     fun recordGpsRestored(point: LocationPoint, spd: Float, accuracy: Float)

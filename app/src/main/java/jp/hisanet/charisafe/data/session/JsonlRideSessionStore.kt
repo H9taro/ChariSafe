@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import jp.hisanet.charisafe.domain.model.EventType
 import jp.hisanet.charisafe.domain.model.LocationPoint
+import jp.hisanet.charisafe.domain.model.RideMovementState
 import jp.hisanet.charisafe.domain.repository.RideSessionStore
 import jp.hisanet.charisafe.util.FileUtils
 import java.io.File
@@ -33,7 +34,7 @@ class JsonlRideSessionStore(private val context: Context) : RideSessionStore {
             fileWriter = FileWriter(file, true)
 
             val event = StartEvent(sid = sessionId)
-            val json = serializeStart(event)
+            val json = serializeEvent(event)
             fileWriter?.appendLine(json)
             fileWriter?.flush()
             isLogging = true
@@ -48,7 +49,7 @@ class JsonlRideSessionStore(private val context: Context) : RideSessionStore {
         if (!isLogging) return
         try {
             val event = StopEvent(sid = sessionId)
-            val json = serializeStop(event)
+            val json = serializeEvent(event)
             fileWriter?.appendLine(json)
             fileWriter?.flush()
             fileWriter?.close()
@@ -61,11 +62,11 @@ class JsonlRideSessionStore(private val context: Context) : RideSessionStore {
     }
 
     @Synchronized
-    override fun recordStateTick(state: String) {
+    override fun recordStateTick(state: RideMovementState) {
         if (!isLogging) return
         try {
             val event = StateTickEvent(st = state)
-            val json = serializeStateTick(event)
+            val json = serializeEvent(event)
             fileWriter?.appendLine(json)
             fileWriter?.flush()
         } catch (e: Exception) {
@@ -78,7 +79,7 @@ class JsonlRideSessionStore(private val context: Context) : RideSessionStore {
         if (!isLogging) return
         try {
             val event = GpsFixEvent(point = point, spd = spd, accuracy = accuracy)
-            val json = serializeGpsFix(event)
+            val json = serializeEvent(event)
             fileWriter?.appendLine(json)
             fileWriter?.flush()
         } catch (e: Exception) {
@@ -91,7 +92,7 @@ class JsonlRideSessionStore(private val context: Context) : RideSessionStore {
         if (!isLogging) return
         try {
             val event = GpsLostEvent(reason = reason)
-            val json = serializeGpsLost(event)
+            val json = serializeEvent(event)
             fileWriter?.appendLine(json)
             fileWriter?.flush()
         } catch (e: Exception) {
@@ -104,7 +105,7 @@ class JsonlRideSessionStore(private val context: Context) : RideSessionStore {
         if (!isLogging) return
         try {
             val event = GpsRestoredEvent(point = point, spd = spd, accuracy = accuracy)
-            val json = serializeGpsRestored(event)
+            val json = serializeEvent(event)
             fileWriter?.appendLine(json)
             fileWriter?.flush()
         } catch (e: Exception) {
@@ -123,7 +124,7 @@ class JsonlRideSessionStore(private val context: Context) : RideSessionStore {
         if (!isLogging) return
         try {
             val event = IncidentEvent(eventType = eventType, value = value, threshold = threshold, point = point, segmentId = segmentId)
-            val json = serializeIncident(event)
+            val json = serializeEvent(event)
             fileWriter?.appendLine(json)
             fileWriter?.flush()
         } catch (e: Exception) {
@@ -133,31 +134,16 @@ class JsonlRideSessionStore(private val context: Context) : RideSessionStore {
 
     override fun getActiveLogFilePath(): String? = sessionFile?.absolutePath
 
-    private fun serializeStart(e: StartEvent): String {
-        return "{\"t\":\"START\",\"ts\":${e.ts},\"sid\":\"${e.sid}\",\"ver\":\"${e.ver}\"}"
-    }
-
-    private fun serializeStop(e: StopEvent): String {
-        return "{\"t\":\"STOP\",\"ts\":${e.ts},\"sid\":\"${e.sid}\"}"
-    }
-
-    private fun serializeStateTick(e: StateTickEvent): String {
-        return "{\"t\":\"STATE_TICK\",\"ts\":${e.ts},\"st\":\"${e.st}\"}"
-    }
-
-    private fun serializeGpsFix(e: GpsFixEvent): String {
-        return "{\"t\":\"GPS_FIX\",\"ts\":${e.ts},\"lat\":${e.point.lat},\"lon\":${e.point.lon},\"ele\":${e.point.ele},\"spd\":${e.spd},\"acc\":${e.accuracy}}"
-    }
-
-    private fun serializeGpsLost(e: GpsLostEvent): String {
-        return "{\"t\":\"GPS_LOST\",\"ts\":${e.ts},\"reason\":\"${e.reason}\"}"
-    }
-
-    private fun serializeGpsRestored(e: GpsRestoredEvent): String {
-        return "{\"t\":\"GPS_RESTORED\",\"ts\":${e.ts},\"lat\":${e.point.lat},\"lon\":${e.point.lon},\"ele\":${e.point.ele},\"spd\":${e.spd},\"acc\":${e.accuracy}}"
-    }
-
-    private fun serializeIncident(e: IncidentEvent): String {
-        return "{\"t\":\"${e.eventType.name}\",\"ts\":${e.ts},\"val\":${e.value},\"th\":${e.threshold},\"lat\":${e.point.lat},\"lon\":${e.point.lon},\"spd\":${e.spd},\"segId\":\"${e.segmentId}\"}"
+    private fun serializeEvent(event: SessionEvent): String {
+        val typeStr = event.kind.name
+        return when (event) {
+            is StartEvent -> "{\"t\":\"$typeStr\",\"ts\":${event.ts},\"sid\":\"${event.sid}\",\"ver\":\"${event.ver}\"}"
+            is StopEvent -> "{\"t\":\"$typeStr\",\"ts\":${event.ts},\"sid\":\"${event.sid}\"}"
+            is StateTickEvent -> "{\"t\":\"$typeStr\",\"ts\":${event.ts},\"st\":\"${event.st.name}\"}"
+            is GpsFixEvent -> "{\"t\":\"$typeStr\",\"ts\":${event.ts},\"lat\":${event.point.lat},\"lon\":${event.point.lon},\"ele\":${event.point.ele},\"spd\":${event.spd},\"acc\":${event.accuracy}}"
+            is GpsLostEvent -> "{\"t\":\"$typeStr\",\"ts\":${event.ts},\"reason\":\"${event.reason}\"}"
+            is GpsRestoredEvent -> "{\"t\":\"$typeStr\",\"ts\":${event.ts},\"lat\":${event.point.lat},\"lon\":${event.point.lon},\"ele\":${event.point.ele},\"spd\":${event.spd},\"acc\":${event.accuracy}}"
+            is IncidentEvent -> "{\"t\":\"$typeStr\",\"ts\":${event.ts},\"val\":${event.value},\"th\":${event.threshold},\"lat\":${event.point.lat},\"lon\":${event.point.lon},\"spd\":${event.spd},\"segId\":\"${event.segmentId}\"}"
+        }
     }
 }
