@@ -32,6 +32,7 @@ class GpxRepositoryImpl(
     }
 
     private val locationTracker = LocationTracker(context)
+    private val jsonlSessionLogger = jp.hisanet.charisafe.data.session.JsonlSessionLogger(context)
     private var gpxWriter: GpxFileWriter? = null
     private var activeGpxFile: File? = null
     private var collectJob: Job? = null
@@ -70,6 +71,7 @@ class GpxRepositoryImpl(
         val file = File(gpxDir, "ride_${timestamp}.gpx")
         activeGpxFile = file
         gpxWriter = GpxFileWriter(file)
+        jsonlSessionLogger.startSession("REC_$timestamp")
 
         locationTracker.startTracking(intervalSeconds)
 
@@ -79,6 +81,7 @@ class GpxRepositoryImpl(
                 if (point != null) {
                     gpxWriter?.appendPoint(point)
                     decelerationDetector.feedPoint(point)
+                    jsonlSessionLogger.logGpxFix(point.latitude, point.longitude, point.elevation, point.speedKmh)
                 }
             }
         }
@@ -89,6 +92,7 @@ class GpxRepositoryImpl(
         collectJob?.cancel()
         collectJob = null
         locationTracker.stopTracking()
+        jsonlSessionLogger.stopSession("REC_STOP")
         gpxWriter = null
         activeGpxFile = null
         Log.i(TAG, "Stopped logging")

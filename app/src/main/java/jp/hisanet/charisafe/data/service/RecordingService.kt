@@ -43,6 +43,7 @@ import jp.hisanet.charisafe.data.camera.RearApproachDetector
 import jp.hisanet.charisafe.data.config.ConfigRepositoryImpl
 import jp.hisanet.charisafe.data.debug.ApproachDebugLogger
 import jp.hisanet.charisafe.data.debug.CollisionDebugLogger
+import jp.hisanet.charisafe.data.session.JsonlSessionLogger
 import jp.hisanet.charisafe.data.debug.DebugLogCleanupManager
 import jp.hisanet.charisafe.data.debug.TraceLayer
 import jp.hisanet.charisafe.data.debug.TraceLogger
@@ -126,6 +127,8 @@ class RecordingService : Service(), LifecycleOwner {
     private var rearApproachDetector: RearApproachDetector? = null
     private var collisionDropDetector: CollisionDropDetector? = null
     private var serviceGpxRepo: jp.hisanet.charisafe.data.repository.GpxRepositoryImpl? = null
+    private val jsonlSessionLogger by lazy { JsonlSessionLogger(this) }
+    private var stateTickJob: Job? = null
 
     private val _soundAmplitudeState = MutableStateFlow(0f)
     private val _approachScoreState = MutableStateFlow(0f)
@@ -303,6 +306,21 @@ class RecordingService : Service(), LifecycleOwner {
         rotationJob = null
     }
 
+    private fun startStateTickTimer() {
+        stateTickJob?.cancel()
+        val gpsIntervalSec = configRepository.getConfig().gpsIntervalSeconds.coerceAtLeast(1L)
+        stateTickJob = serviceScope.launch(Dispatchers.IO) {
+            while (true) {
+                delay(gpsIntervalSec * 1000L)
+                if (_serviceState.value.isRecording) {
+                    val speed = serviceGpxRepo?.currentGpxPoint?.value?.speedKmh ?: LocationTracker.lastValidSpeedKmh
+                    val state = if (speed >= 1.0f) "MOVING" else "STOPPED"
+                    jsonlSessionLogger.logStateTick(state)
+                }
+            }
+        }
+    }
+
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,
@@ -373,6 +391,8 @@ class RecordingService : Service(), LifecycleOwner {
 
         val sessionId = "REC_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         traceLogger.startSession(sessionId)
+        jsonlSessionLogger.startSession(sessionId)
+        startStateTickTimer()
 
         ringBufferManager?.clearAll()
 
@@ -559,6 +579,19 @@ class RecordingService : Service(), LifecycleOwner {
             detectedValue = detectedValue,
             thresholdValue = thresholdValue,
             displayLabel = displayLabel
+        )
+
+        val currentFilePath = _serviceState.value.currentFile
+        val currentFileObj = File(currentFilePath)
+        val currentSegmentName = if (currentFileObj.exists()) currentFileObj.name else ""
+        jsonlSessionLogger.logEvent(
+            eventType = eventType.name,
+            value = detectedValue,
+            threshold = thresholdValue,
+            spd = speedKmh,
+            lat = lat,
+            lon = lon,
+            segmentId = currentSegmentName
         )
 
         val existingDetections = EventDetectionLogStore.loadLogs(this).toMutableList()
@@ -1086,6 +1119,9 @@ class RecordingService : Service(), LifecycleOwner {
     }
 
     private fun stopForegroundAndSelf() {
+        stateTickJob?.cancel()
+        stateTickJob = null
+        jsonlSessionLogger.stopSession("REC_STOP")
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
