@@ -129,7 +129,7 @@ class RecordingService : Service(), LifecycleOwner {
     private var rearApproachDetector: RearApproachDetector? = null
     private var collisionDropDetector: CollisionDropDetector? = null
     private var serviceGpxRepo: jp.hisanet.charisafe.data.repository.GpxRepositoryImpl? = null
-    private val jsonlSessionStore by lazy { JsonlRideSessionStore(this) }
+    private val jsonlSessionStore by lazy { JsonlRideSessionStore.getInstance(this) }
     private var stateTickJob: Job? = null
 
     private val _soundAmplitudeState = MutableStateFlow(0f)
@@ -355,11 +355,15 @@ class RecordingService : Service(), LifecycleOwner {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-        startForeground(
-            NOTIFICATION_ID,
-            notification,
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-        )
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            var fgsType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            if (audioEnabled) {
+                fgsType = fgsType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            }
+            startForeground(NOTIFICATION_ID, notification, fgsType)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun acquireWakeLock() {

@@ -5,7 +5,6 @@ import android.util.Log
 import jp.hisanet.charisafe.domain.model.EventType
 import jp.hisanet.charisafe.domain.model.LocationPoint
 import jp.hisanet.charisafe.domain.model.RideMovementState
-import jp.hisanet.charisafe.domain.repository.RideSessionStore
 import jp.hisanet.charisafe.util.FileUtils
 import java.io.File
 import java.io.FileWriter
@@ -13,9 +12,18 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+
 class JsonlRideSessionStore(private val context: Context) : RideSessionStore {
     companion object {
         private const val TAG = "JsonlRideSessionStore"
+        @Volatile
+        private var instance: JsonlRideSessionStore? = null
+
+        fun getInstance(context: Context): JsonlRideSessionStore {
+            return instance ?: synchronized(this) {
+                instance ?: JsonlRideSessionStore(context.applicationContext).also { instance = it }
+            }
+        }
     }
 
     private var sessionFile: File? = null
@@ -33,7 +41,11 @@ class JsonlRideSessionStore(private val context: Context) : RideSessionStore {
             sessionFile = file
             fileWriter = FileWriter(file, true)
 
-            val event = StartEvent(sid = sessionId)
+            val event = StartEvent(
+                sid = sessionId,
+                ts = System.currentTimeMillis(),
+                ver = "1.0"
+            )
             val json = serializeEvent(event)
             fileWriter?.appendLine(json)
             fileWriter?.flush()
@@ -45,10 +57,10 @@ class JsonlRideSessionStore(private val context: Context) : RideSessionStore {
     }
 
     @Synchronized
-    override fun stopSession(sessionId: String) {
+    override fun stopSession(reason: String) {
         if (!isLogging) return
         try {
-            val event = StopEvent(sid = sessionId)
+            val event = StopEvent(sid = reason)
             val json = serializeEvent(event)
             fileWriter?.appendLine(json)
             fileWriter?.flush()
@@ -123,7 +135,13 @@ class JsonlRideSessionStore(private val context: Context) : RideSessionStore {
     ) {
         if (!isLogging) return
         try {
-            val event = IncidentEvent(eventType = eventType, value = value, threshold = threshold, point = point, segmentId = segmentId)
+            val event = IncidentEvent(
+                eventType = eventType,
+                value = value,
+                threshold = threshold,
+                point = point,
+                segmentId = segmentId,
+            )
             val json = serializeEvent(event)
             fileWriter?.appendLine(json)
             fileWriter?.flush()
@@ -132,7 +150,7 @@ class JsonlRideSessionStore(private val context: Context) : RideSessionStore {
         }
     }
 
-    override fun getActiveLogFilePath(): String? = sessionFile?.absolutePath
+    override fun getCurrentSessionFile(): File? = sessionFile
 
     private fun serializeEvent(event: SessionEvent): String {
         val typeStr = event.kind.name

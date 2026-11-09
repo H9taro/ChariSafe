@@ -1,21 +1,30 @@
 package jp.hisanet.charisafe.domain.model
 
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.pow
+import kotlin.math.sin
+import kotlin.math.sqrt
+
 data class LocationPoint(
     val lat: Double,
     val lon: Double,
-    val ele: Double = 0.0
+    val ele: Double
 ) {
     fun distanceTo(other: LocationPoint): Double {
-        val earthRadiusKm = 6371.0
-        val dLat = Math.toRadians(other.lat - this.lat)
-        val dLon = Math.toRadians(other.lon - this.lon)
-        val lat1 = Math.toRadians(this.lat)
-        val lat2 = Math.toRadians(other.lat)
+        val earthRadiusMeters = 6371000.0
 
-        val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
-                kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2) *
-                kotlin.math.cos(lat1) * kotlin.math.cos(lat2)
-        val c = 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
-        return earthRadiusKm * c // kilometers
+        val dLat = Math.toRadians(other.lat - lat)
+        val dLon = Math.toRadians(other.lon - lon)
+
+        val a =
+            sin(dLat / 2.0).pow(2.0) +
+                    cos(Math.toRadians(lat)) *
+                    cos(Math.toRadians(other.lat)) *
+                    sin(dLon / 2.0).pow(2.0)
+
+        val c = 2.0 * atan2(sqrt(a), sqrt(1.0 - a))
+
+        return earthRadiusMeters * c
     }
 }

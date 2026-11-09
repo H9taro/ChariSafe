@@ -419,10 +419,11 @@ fun MainContent(viewModel: MainViewModel, uiState: MainUiState) {
             }
         }
 
+        val context = LocalContext.current
         // 3. シャッターボタン
         CameraShutterButton(isRecording = isRecording) {
             if (!isScreenLocked) {
-                if (isRecording) viewModel.stopRecording() else viewModel.startRecording()
+                if (isRecording) viewModel.stopRecording() else viewModel.startRecording(context)
             }
         }
     }

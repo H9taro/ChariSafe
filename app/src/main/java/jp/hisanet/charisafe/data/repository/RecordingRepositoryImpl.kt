@@ -81,7 +81,7 @@ class RecordingRepositoryImpl(private val context: Context) : RecordingRepositor
         context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
-    override fun startRecording(config: AppConfig) {
+    override fun startRecording(context: Context, config: AppConfig) {
         val startIntent = Intent(context, RecordingService::class.java).apply {
             action = RecordingService.ACTION_START_RECORDING
             putExtra(RecordingService.EXTRA_ACTIVE_CAMERA, config.activeCamera.name)

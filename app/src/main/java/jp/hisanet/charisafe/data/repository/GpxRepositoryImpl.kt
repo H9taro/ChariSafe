@@ -10,6 +10,7 @@ import jp.hisanet.charisafe.data.session.JsonlRideSessionStore
 import jp.hisanet.charisafe.domain.model.GpxPoint
 import jp.hisanet.charisafe.domain.model.LocationPoint
 import jp.hisanet.charisafe.domain.repository.GpxRepository
+import jp.hisanet.charisafe.data.session.RideSessionStore
 import jp.hisanet.charisafe.util.FileUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,7 +35,7 @@ class GpxRepositoryImpl(
     }
 
     private val locationTracker = LocationTracker(context)
-    private val jsonlSessionStore = JsonlRideSessionStore(context)
+    private val jsonlSessionStore = JsonlRideSessionStore.getInstance(context)
     private var gpxWriter: GpxFileWriter? = null
     private var activeGpxFile: File? = null
     private var collectJob: Job? = null
