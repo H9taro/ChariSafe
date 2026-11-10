@@ -638,6 +638,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 gpxDir.mkdirs()
 
+                // 5.5 logs フォルダ（JSONLセッションログ）の全削除 ＆ 再作成
+                val logsDir = jp.hisanet.charisafe.util.FileUtils.getLogsDir(context)
+                if (logsDir.exists()) {
+                    logsDir.deleteRecursively()
+                }
+                logsDir.mkdirs()
+
                 // 6. debug フォルダ（CSV等）の全削除 ＆ 再作成
                 val debugDir = context.getExternalFilesDir("debug") ?: File(context.filesDir, "debug")
                 if (debugDir.exists()) {
