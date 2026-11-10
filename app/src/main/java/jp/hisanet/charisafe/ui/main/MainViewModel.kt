@@ -12,7 +12,6 @@ import jp.hisanet.charisafe.data.local.RideSummaryStore
 import jp.hisanet.charisafe.data.repository.EventLogRepositoryImpl
 import jp.hisanet.charisafe.data.repository.GpxRepositoryImpl
 import jp.hisanet.charisafe.data.repository.RecordingRepositoryImpl
-import jp.hisanet.charisafe.data.debug.DecelerationDebugLogger
 import jp.hisanet.charisafe.data.debug.TraceLayer
 import jp.hisanet.charisafe.data.debug.TraceLogger
 import jp.hisanet.charisafe.data.debug.TraceMetric
@@ -94,8 +93,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val configRepository: ConfigRepository = ConfigRepositoryImpl(application)
     private val recordingRepository: RecordingRepository = RecordingRepositoryImpl(application)
-    private val decelerationDebugLogger = DecelerationDebugLogger(application)
-    private val gpxRepository: GpxRepository = GpxRepositoryImpl(application, decelerationDebugLogger)
+    private val gpxRepository: GpxRepository = GpxRepositoryImpl.getInstance(application)
     private val eventLogRepository: EventLogRepository = EventLogRepositoryImpl(application)
     private val uiStateDebugLogger = jp.hisanet.charisafe.data.debug.UiStateDebugLogger(application)
 
@@ -546,14 +544,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun startRecording(context: Context) {
         val config = configRepository.getConfig()
         recordingRepository.startRecording(context, config)
-        gpxRepository.startLogging(config.gpsIntervalSeconds)
         rideStartTimeMs = System.currentTimeMillis()
         _sessionStartTimeMs.value = rideStartTimeMs
     }
 
     fun stopRecording() {
         recordingRepository.stopRecording()
-        gpxRepository.stopLogging()
 
         _sessionStartTimeMs.value = 0L
         rideStartTimeMs = 0L

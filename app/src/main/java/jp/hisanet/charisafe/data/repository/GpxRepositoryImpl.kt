@@ -24,18 +24,27 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class GpxRepositoryImpl(
-    private val context: Context,
+class GpxRepositoryImpl private constructor(
+    context: Context,
     private val decelerationDebugLogger: DecelerationDebugLogger? = null
 ) : GpxRepository {
-    constructor(context: Context) : this(context, null)
+    private val appContext = context.applicationContext
+    constructor(context: Context) : this(context.applicationContext, null)
 
     companion object {
         private const val TAG = "GpxRepositoryImpl"
+        @Volatile
+        private var instance: GpxRepositoryImpl? = null
+
+        fun getInstance(context: Context, decelerationDebugLogger: DecelerationDebugLogger? = null): GpxRepositoryImpl {
+            return instance ?: synchronized(this) {
+                instance ?: GpxRepositoryImpl(context.applicationContext, decelerationDebugLogger).also { instance = it }
+            }
+        }
     }
 
-    private val locationTracker = LocationTracker(context)
-    private val jsonlSessionStore = JsonlRideSessionStore.getInstance(context)
+    private val locationTracker = LocationTracker(appContext)
+    private val jsonlSessionStore = JsonlRideSessionStore.getInstance(appContext)
     private var gpxWriter: GpxFileWriter? = null
     private var activeGpxFile: File? = null
     private var collectJob: Job? = null
@@ -46,7 +55,7 @@ class GpxRepositoryImpl(
     private val decelerationDetector = SpeedDecelerationDetector(
         decelerationDebugLogger = decelerationDebugLogger,
         getTargetDecelerationMs2 = {
-            val prefs = context.getSharedPreferences("charisafe_app_config", Context.MODE_PRIVATE)
+            val prefs = appContext.getSharedPreferences("charisafe_app_config", Context.MODE_PRIVATE)
             prefs.getFloat("key_decel_sensitivity", 2.5f)
         }
     ) {
@@ -69,7 +78,7 @@ class GpxRepositoryImpl(
     }
 
     override fun startLogging(intervalSeconds: Long) {
-        val gpxDir = FileUtils.getGpxDir(context)
+        val gpxDir = FileUtils.getGpxDir(appContext)
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val file = File(gpxDir, "ride_${timestamp}.gpx")
         activeGpxFile = file

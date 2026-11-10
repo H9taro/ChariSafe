@@ -210,7 +210,7 @@ class RecordingService : Service(), LifecycleOwner {
         }
 
         val decelerationDebugLogger = jp.hisanet.charisafe.data.debug.DecelerationDebugLogger(this)
-        val gpxRepo = jp.hisanet.charisafe.data.repository.GpxRepositoryImpl(this, decelerationDebugLogger)
+        val gpxRepo = jp.hisanet.charisafe.data.repository.GpxRepositoryImpl.getInstance(this, decelerationDebugLogger)
         gpxRepo.onDecelerationDetected = {
             val prefs = getSharedPreferences("charisafe_app_config", MODE_PRIVATE)
             val sens = prefs.getFloat("key_decel_sensitivity", 1.5f)
