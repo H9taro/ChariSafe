@@ -201,6 +201,21 @@ class JsonlSessionRepository(private val context: Context) {
         }
     }
 
+    fun isAlreadyCompared(fileName: String): Boolean {
+        try {
+            val debugDir = FileUtils.getDebugDir(context)
+            val dateStr = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+            val csvFile = File(debugDir, "jsonl_comparison_${dateStr}.csv")
+            if (!csvFile.exists()) return false
+            csvFile.useLines { lines ->
+                return lines.any { it.contains(fileName) }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to check if file already compared", e)
+        }
+        return false
+    }
+
     private fun persistComparisonResult(fileName: String, gpx: RideSummary, jsonl: RideSummary, status: String) {
         try {
             val debugDir = FileUtils.getDebugDir(context)

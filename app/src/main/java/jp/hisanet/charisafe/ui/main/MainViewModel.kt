@@ -127,8 +127,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         combine(_currentScreen, _targetEventId, _sensitivity) { screen, targetId, sens ->
             Triple(screen, targetId, sens)
         },
-        combine(_currentRideSummary, _rideSummaries, _sessionStartTimeMs, _isZipGenerating) { _, summaries, sessionStart, isZipGen ->
-            listOf(null, summaries, sessionStart, isZipGen)
+        combine(_currentRideSummary, _rideSummaries, _sessionStartTimeMs, _isZipGenerating) { currentSummary, summaries, sessionStart, isZipGen ->
+            listOf(currentSummary, summaries, sessionStart, isZipGen)
         },
         combine(recordingRepository.approachScoreState, gpxRepository.decelerationState, recordingRepository.gForceState, recordingRepository.soundAmplitudeState) { app, dec, g, snd ->
             listOf(app, dec, g, snd)
@@ -147,6 +147,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val sensitivity = p3.third
 
         @Suppress("UNCHECKED_CAST")
+        val currentSummary = p4[0] as? RideSummary
         val summaries = p4[1] as? List<RideSummary> ?: emptyList()
         val sessionStart = p4[2] as Long
         val isZipGen = p4[3] as Boolean
@@ -209,7 +210,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        val avgSpd = if (speedCount > 0) speedSum / speedCount else 0f
+        val avgSpd = if (totalDistKm > 0.0 && movingSec > 0L) (totalDistKm / (movingSec / 3600.0)).toFloat() else 0f
         if (movingSec == 0L && stoppedSec == 0L && totalActiveSec > 0L) {
             movingSec = totalActiveSec
         }
@@ -289,7 +290,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             sessionEventCounts = totalCounts,
             eventCounts = totalCounts,
             sensitivity = sensitivity,
-            currentRideSummary = liveSummary,
+            currentRideSummary = currentSummary,
             currentApproachScore = approachVal,
             currentDecelValue = decelVal,
             currentGValue = gVal,
@@ -320,6 +321,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     synchronized(recordedPoints) {
                         recordedPoints.add(point)
                     }
+                    updateLiveRideSummary()
                 }
             }
         }
@@ -343,6 +345,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 } else emptyList()
 
                 if (jsonlFiles.isNotEmpty()) {
+                    val gpxDir = jp.hisanet.charisafe.util.FileUtils.getGpxDir(context)
+                    val gpxFilesForShadowRun = if (gpxDir.exists()) {
+                        gpxDir.listFiles { _, name -> name.endsWith(".gpx") }?.sortedBy { it.lastModified() } ?: emptyList()
+                    } else emptyList()
+
+                    for (jsonlFile in jsonlFiles) {
+                        if (!jsonlRepo.isAlreadyCompared(jsonlFile.name)) {
+                            val jsonlName = jsonlFile.name
+                            val timestampPart = jsonlName.substringAfter("session_").substringBefore(".jsonl")
+                            val matchingGpx = gpxFilesForShadowRun.find { it.name == "ride_${timestampPart}.gpx" }
+                            if (matchingGpx != null) {
+                                val points = readGpxPoints(matchingGpx)
+                                if (points.isNotEmpty()) {
+                                    val gpxSummary = calculateGpxSummaryFromPoints(points, context)
+                                    jsonlRepo.compareWithGpxSummary(jsonlFile, gpxSummary)
+                                }
+                            }
+                        }
+                    }
+
                     val sessionSummaries = jsonlFiles.map { jsonlRepo.calculateRideSummary(it) }
                     val validSummaries = sessionSummaries.filter { 
                         it.startTimeMs > 0L && (it.totalDistanceKm > 0.0 || it.movingTimeSec > 0L || it.eventCounts.approachCount > 0 || it.eventCounts.decelerationCount > 0 || it.eventCounts.collisionCount > 0 || it.eventCounts.soundCount > 0)
@@ -368,7 +390,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
 
                         val hours = if (movingSec > 0L) movingSec / 3600.0 else ((movingSec + stoppedSec) / 3600.0).coerceAtLeast(1.0 / 3600.0)
-                        val avgSpd = if (totalDistKm > 0.0 && hours > 0.0) (totalDistKm / hours).toFloat() else 0f
+                        val avgSpd = if (totalDistKm > 0.0 && movingSec > 0L) (totalDistKm / (movingSec / 3600.0)).toFloat() else if (totalDistKm > 0.0 && hours > 0.0) (totalDistKm / hours).toFloat() else 0f
 
                         val distForRate = if (totalDistKm > 0.0) totalDistKm.toFloat() else 1.0f
                         val hoursForRate = if (hours > 0.0) hours.toFloat() else 1.0f
@@ -406,108 +428,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                val gpxDir = jp.hisanet.charisafe.util.FileUtils.getGpxDir(context)
-                if (!gpxDir.exists()) {
-                    withContext(Dispatchers.Main) {
-                        _currentRideSummary.value = null
-                        _rideSummaries.value = emptyList()
-                    }
-                    return@launch
-                }
-
-                val gpxFiles = gpxDir.listFiles { _, name -> name.endsWith(".gpx") }?.sortedBy { it.lastModified() } ?: return@launch
-                if (gpxFiles.isEmpty()) {
-                    withContext(Dispatchers.Main) {
-                        _currentRideSummary.value = null
-                        _rideSummaries.value = emptyList()
-                    }
-                    return@launch
-                }
-
-                val allPoints = mutableListOf<GpxPoint>()
-                for (file in gpxFiles) {
-                    val points = readGpxPoints(file)
-                    allPoints.addAll(points)
-                }
-                if (allPoints.isEmpty()) return@launch
-
-                allPoints.sortBy { it.timestampMs }
-
-                val startTimeMs = allPoints.first().timestampMs
-                val endTimeMs = allPoints.last().timestampMs
-
-                var totalDistKm = 0.0
-                var maxSpd = 0f
-                var speedSum = 0f
-                var speedCount = 0
-                var movingSec = 0L
-                var stoppedSec = 0L
-
-                for (i in 1 until allPoints.size) {
-                    val p1 = allPoints[i - 1]
-                    val p2 = allPoints[i]
-                    val dist = calculateHaversineDistance(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
-                    totalDistKm += dist
-                    if (p2.speedKmh > maxSpd) maxSpd = p2.speedKmh
-                    speedSum += p2.speedKmh
-                    speedCount++
-
-                    val dt = (p2.timestampMs - p1.timestampMs) / 1000L
-                    if (dt in 1..60) {
-                        if (p2.speedKmh >= 1.0f) {
-                            movingSec += dt
-                        } else {
-                            stoppedSec += dt
-                        }
-                    }
-                }
-
-                val avgSpd = if (speedCount > 0) speedSum / speedCount else 0f
-                val totalDurationSec = if (startTimeMs > 0) (endTimeMs - startTimeMs) / 1000L else 0L
-                if (movingSec == 0L && stoppedSec == 0L && totalDurationSec > 0L) {
-                    movingSec = totalDurationSec
-                }
-                val hours = if (totalDurationSec > 0) totalDurationSec / 3600.0 else 1.0
-
-                val detections = jp.hisanet.charisafe.data.local.EventDetectionLogStore.loadLogs(context)
-                val counts = EventCountSummary(
-                    approachCount = detections.count { it.eventType == EventType.APPROACH },
-                    decelerationCount = detections.count { it.eventType == EventType.DECELERATION },
-                    collisionCount = detections.count { it.eventType == EventType.COLLISION },
-                    soundCount = detections.count { it.eventType == EventType.SOUND }
-                )
-
-                val cumulativeSummary = RideSummary(
-                    id = "cumulative_ride_summary",
-                    gpxFileName = "all_rides_accumulated",
-                    isCompleted = true,
-                    lastAggregatedTimestampMs = endTimeMs,
-                    startTimeMs = startTimeMs,
-                    endTimeMs = endTimeMs,
-                    movingTimeSec = movingSec,
-                    stoppedTimeSec = stoppedSec,
-                    totalDistanceKm = totalDistKm,
-                    averageSpeedKmh = avgSpd,
-                    maxSpeedKmh = maxSpd,
-                    eventCounts = counts,
-                    decelerationPerKm = if (totalDistKm > 0.0) counts.decelerationCount.toFloat() / totalDistKm.toFloat() else 0f,
-                    decelerationPerHour = (counts.decelerationCount.toFloat() / hours).toFloat(),
-                    approachPerKm = if (totalDistKm > 0.0) counts.approachCount.toFloat() / totalDistKm.toFloat() else 0f,
-                    approachPerHour = (counts.approachCount.toFloat() / hours).toFloat(),
-                    collisionPerKm = if (totalDistKm > 0.0) counts.collisionCount.toFloat() / totalDistKm.toFloat() else 0f,
-                    collisionPerHour = (counts.collisionCount.toFloat() / hours).toFloat(),
-                    soundPerKm = if (totalDistKm > 0.0) counts.soundCount.toFloat() / totalDistKm.toFloat() else 0f,
-                    soundPerHour = (counts.soundCount.toFloat() / hours).toFloat()
-                )
-
-                TraceLogger.getInstance(context).log(TraceMetric.RECORDING_STATE, TraceLayer.SYSTEM, totalDistKm.toFloat(), "CUMULATIVE_RIDE_SUMMARY_CALCULATED", force = true)
-
+                // Phase 3 SSOT policy: No GPX fallback. If JSONL is empty/absent, summary is empty.
                 withContext(Dispatchers.Main) {
-                    _currentRideSummary.value = cumulativeSummary
-                    _rideSummaries.value = listOf(cumulativeSummary)
+                    _currentRideSummary.value = null
+                    _rideSummaries.value = emptyList()
                 }
             } catch (e: Exception) {
                 Log.e("MainViewModel", "Failed to calculate cumulative ride summary", e)
+                withContext(Dispatchers.Main) {
+                    _currentRideSummary.value = null
+                    _rideSummaries.value = emptyList()
+                }
             }
         }
     }
@@ -546,6 +477,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         recordingRepository.startRecording(context, config)
         rideStartTimeMs = System.currentTimeMillis()
         _sessionStartTimeMs.value = rideStartTimeMs
+        synchronized(recordedPoints) {
+            recordedPoints.clear()
+        }
+        updateLiveRideSummary()
     }
 
     fun stopRecording() {
@@ -844,5 +779,158 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun shareVideosOnly() {
         createAndShareZip("charisafe_videos_only.zip", "録画動画をすべて共有(ZIP)", includeVideos = true, includeLogs = false)
+    }
+
+    private fun calculateGpxSummaryFromPoints(points: List<GpxPoint>, context: Context): RideSummary {
+        if (points.isEmpty()) {
+            return RideSummary(
+                startTimeMs = 0L,
+                endTimeMs = 0L,
+                movingTimeSec = 0L,
+                stoppedTimeSec = 0L,
+                totalDistanceKm = 0.0,
+                averageSpeedKmh = 0f,
+                maxSpeedKmh = 0f,
+                eventCounts = EventCountSummary(),
+                decelerationPerKm = 0f, decelerationPerHour = 0f,
+                approachPerKm = 0f, approachPerHour = 0f,
+                collisionPerKm = 0f, collisionPerHour = 0f,
+                soundPerKm = 0f, soundPerHour = 0f
+            )
+        }
+        val sortedPoints = points.sortedBy { it.timestampMs }
+        val startTimeMs = sortedPoints.first().timestampMs
+        val endTimeMs = sortedPoints.last().timestampMs
+
+        var totalDistKm = 0.0
+        var maxSpd = 0f
+        var speedSum = 0f
+        var speedCount = 0
+        var movingSec = 0L
+        var stoppedSec = 0L
+
+        for (i in 1 until sortedPoints.size) {
+            val p1 = sortedPoints[i - 1]
+            val p2 = sortedPoints[i]
+            val dist = calculateHaversineDistance(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
+            totalDistKm += dist
+            if (p2.speedKmh > maxSpd) maxSpd = p2.speedKmh
+            speedSum += p2.speedKmh
+            speedCount++
+
+            val dt = (p2.timestampMs - p1.timestampMs) / 1000L
+            if (dt in 1..60) {
+                if (p2.speedKmh >= 1.0f) {
+                    movingSec += dt
+                } else {
+                    stoppedSec += dt
+                }
+            }
+        }
+
+        val avgSpd = if (totalDistKm > 0.0 && movingSec > 0L) (totalDistKm / (movingSec / 3600.0)).toFloat() else 0f
+        val totalDurationSec = if (startTimeMs > 0) (endTimeMs - startTimeMs) / 1000L else 0L
+        if (movingSec == 0L && stoppedSec == 0L && totalDurationSec > 0L) {
+            movingSec = totalDurationSec
+        }
+        val hours = if (totalDurationSec > 0) totalDurationSec / 3600.0 else 1.0
+
+        val detections = jp.hisanet.charisafe.data.local.EventDetectionLogStore.loadLogs(context)
+        val counts = EventCountSummary(
+            approachCount = detections.count { it.eventType == EventType.APPROACH },
+            decelerationCount = detections.count { it.eventType == EventType.DECELERATION },
+            collisionCount = detections.count { it.eventType == EventType.COLLISION },
+            soundCount = detections.count { it.eventType == EventType.SOUND }
+        )
+
+        val distForRate = if (totalDistKm > 0.0) totalDistKm.toFloat() else 1.0f
+        val hoursForRate = if (hours > 0.0) hours.toFloat() else 1.0f
+
+        return RideSummary(
+            id = "gpx_summary",
+            gpxFileName = "",
+            isCompleted = true,
+            lastAggregatedTimestampMs = endTimeMs,
+            startTimeMs = startTimeMs,
+            endTimeMs = endTimeMs,
+            movingTimeSec = movingSec,
+            stoppedTimeSec = stoppedSec,
+            totalDistanceKm = totalDistKm,
+            averageSpeedKmh = avgSpd,
+            maxSpeedKmh = maxSpd,
+            eventCounts = counts,
+            decelerationPerKm = counts.decelerationCount.toFloat() / distForRate,
+            decelerationPerHour = (counts.decelerationCount.toFloat() / hoursForRate),
+            approachPerKm = counts.approachCount.toFloat() / distForRate,
+            approachPerHour = (counts.approachCount.toFloat() / hoursForRate),
+            collisionPerKm = counts.collisionCount.toFloat() / distForRate,
+            collisionPerHour = (counts.collisionCount.toFloat() / hoursForRate),
+            soundPerKm = counts.soundCount.toFloat() / distForRate,
+            soundPerHour = (counts.soundCount.toFloat() / hoursForRate)
+        )
+    }
+
+    private fun updateLiveRideSummary() {
+        val sessionStart = _sessionStartTimeMs.value
+        val activeStart = if (sessionStart > 0L) sessionStart else (rideStartTimeMs.takeIf { it > 0L } ?: System.currentTimeMillis())
+        val totalActiveSec = if (sessionStart > 0L || rideStartTimeMs > 0L) ((System.currentTimeMillis() - activeStart) / 1000L).coerceAtLeast(0L) else 0L
+        val hours = if (totalActiveSec > 0) totalActiveSec / 3600.0 else 1.0
+        val pointsCopy = synchronized(recordedPoints) { recordedPoints.toList() }
+        var totalDistKm = 0.0
+        var maxSpd = 0f
+        var movingSec = 0L
+        var stoppedSec = 0L
+
+        for (i in 1 until pointsCopy.size) {
+            val p1 = pointsCopy[i - 1]
+            val p2 = pointsCopy[i]
+            val dist = calculateHaversineDistance(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
+            totalDistKm += dist
+            if (p2.speedKmh > maxSpd) maxSpd = p2.speedKmh
+
+            val dt = (p2.timestampMs - p1.timestampMs) / 1000L
+            if (dt in 1..60) {
+                if (p2.speedKmh >= 1.0f) {
+                    movingSec += dt
+                } else {
+                    stoppedSec += dt
+                }
+            }
+        }
+        if (movingSec == 0L && stoppedSec == 0L && totalActiveSec > 0L) {
+            movingSec = totalActiveSec
+        }
+        val avgSpd = if (totalDistKm > 0.0 && movingSec > 0L) (totalDistKm / (movingSec / 3600.0)).toFloat() else 0f
+
+        val detections = eventLogRepository.eventDetectionLogs.value
+        val totalCounts = EventCountSummary(
+            approachCount = detections.count { it.eventType == EventType.APPROACH },
+            decelerationCount = detections.count { it.eventType == EventType.DECELERATION },
+            collisionCount = detections.count { it.eventType == EventType.COLLISION },
+            soundCount = detections.count { it.eventType == EventType.SOUND }
+        )
+
+        val distForRate = if (totalDistKm > 0.0) totalDistKm.toFloat() else 1.0f
+        val hoursForRate = if (hours > 0.0) hours.toFloat() else 1.0f
+
+        val liveSummary = RideSummary(
+            startTimeMs = activeStart,
+            endTimeMs = System.currentTimeMillis(),
+            movingTimeSec = movingSec,
+            stoppedTimeSec = stoppedSec,
+            totalDistanceKm = totalDistKm,
+            averageSpeedKmh = avgSpd,
+            maxSpeedKmh = maxSpd,
+            eventCounts = totalCounts,
+            decelerationPerKm = totalCounts.decelerationCount.toFloat() / distForRate,
+            decelerationPerHour = totalCounts.decelerationCount.toFloat() / hoursForRate,
+            approachPerKm = totalCounts.approachCount.toFloat() / distForRate,
+            approachPerHour = totalCounts.approachCount.toFloat() / hoursForRate,
+            collisionPerKm = totalCounts.collisionCount.toFloat() / distForRate,
+            collisionPerHour = totalCounts.collisionCount.toFloat() / hoursForRate,
+            soundPerKm = totalCounts.soundCount.toFloat() / distForRate,
+            soundPerHour = totalCounts.soundCount.toFloat() / hoursForRate
+        )
+        _currentRideSummary.value = liveSummary
     }
 }
